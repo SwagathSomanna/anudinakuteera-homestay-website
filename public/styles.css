@@ -1667,6 +1667,80 @@ footer a {
   color: var(--accent);
 }
 
+/* Footer: tablet/mobile – keep row, align VARA center with Anudina logo center */
+@media (max-width: 1024px) {
+  .footer-inner {
+    align-items: flex-start;
+  }
+
+  /* Center of Anudina logo (~9rem) = 4.5rem; center of VARA (4rem) = 2rem → offset 2.5rem */
+  .vara-logo-footer-wrap {
+    margin-top: 2.5rem;
+  }
+
+  .footer-right {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .footer-right p {
+    text-align: center;
+    width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  footer {
+    padding: 1.5rem 1rem;
+  }
+
+  .footer-inner {
+    position: relative;
+    align-items: flex-start;
+    min-height: 12rem;
+  }
+
+  /* VARA stays left, unchanged */
+  .vara-logo-footer-wrap {
+    margin-top: 2rem;
+  }
+
+  /* Mobile only: Anudina logo + copyright centered in the middle of the screen */
+  .footer-right {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: calc(100% - 6rem);
+  }
+
+  .footer-right p {
+    text-align: center;
+    width: 100%;
+  }
+
+  .footer-logo {
+    height: clamp(8rem, 25vw, 11rem);
+  }
+}
+
+@media (max-width: 480px) {
+  footer {
+    padding: 1.25rem 0.75rem;
+  }
+
+  .vara-logo-footer-wrap {
+    margin-top: 1.5rem;
+  }
+
+  .footer-logo {
+    height: clamp(7rem, 22vw, 9rem);
+  }
+}
+
 /* Fixed WhatsApp button - bottom right, stays on scroll */
 .whatsapp-float {
   position: fixed;
