@@ -189,6 +189,37 @@ h6 {
   margin-bottom: 4rem;
 }
 
+.nav-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.vara-logo-link {
+  flex-shrink: 0;
+  display: block;
+  line-height: 0;
+}
+.vara-logo-link::after {
+  display: none;
+}
+
+.vara-logo {
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+
+.vara-logo-header {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+.vara-logo-footer {
+  width: 4rem;
+  height: 4rem;
+}
+
 .nav ul {
   list-style: none;
   display: flex;
@@ -1594,13 +1625,34 @@ button:disabled,
 
 footer {
   display: block;
-  text-align: center;
   padding: 2rem;
   padding-bottom: max(2rem, env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
   color: var(--muted);
   background: #fbfbf6;
   min-height: 120px;
+}
+
+.footer-inner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2rem;
+  flex-wrap: wrap;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.vara-logo-footer-wrap {
+  flex-shrink: 0;
+  /* Align vertical center of VARA (4rem) with center of Anudina logo (11rem): 5.5rem - 2rem = 3.5rem */
+  margin-top: 3.5rem;
+}
+
+.footer-right {
+  flex: 1;
+  min-width: 200px;
+  text-align: center;
 }
 
 .footer-logo {
@@ -1613,6 +1665,32 @@ footer {
 
 footer a {
   color: var(--accent);
+}
+
+/* Fixed WhatsApp button - bottom right, stays on scroll */
+.whatsapp-float {
+  position: fixed;
+  bottom: max(1.5rem, env(safe-area-inset-bottom));
+  right: max(1.5rem, env(safe-area-inset-right));
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  background: #25d366;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(37, 211, 102, 0.4);
+  z-index: 9999;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.whatsapp-float:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(37, 211, 102, 0.5);
+}
+.whatsapp-float-icon {
+  width: 1.75rem;
+  height: 1.75rem;
 }
 
 .modal-backdrop {
