@@ -1,26 +1,109 @@
 import mongoose from "mongoose";
 const { Schema } = mongoose;
+const roomIds = JSON.parse(process.env.ROOM_IDS);
 
-//cant use isbooked here, cos automatically, it doesnt become false.
+//this contains info about the room and the base price also
+const capacitySchema = new Schema(
+  {
+    minAdults: {
+      type: Number,
+      required: true,
+    },
+    maxAdults: {
+      type: Number,
+      required: true,
+    },
+    maxChildren: {
+      type: Number,
+      required: true,
+    },
+    maxTotal: {
+      type: Number,
+      required: true,
+    },
+  },
+  { _id: false },
+);
 
 const roomSchema = new Schema({
-  roomId: { type: String, required: true }, // e.g. "R1", "R2"
-  name: String,
-  price: Number,
+  roomId: {
+    type: String,
+    enum: roomIds,
+    required: true,
+  },
+
+  propertyId: {
+    type: String,
+    required: true,
+  },
+
+  name: {
+    type: String,
+    required: true,
+  },
+
+  description: {
+    type: String,
+    required: true,
+  },
+
+  type: {
+    type: String,
+    required: true,
+    enum: ["Room", "Dormitory"],
+  },
+
+  pricePerNight: {
+    type: Number,
+    required: true,
+  },
+
+  capacity: capacitySchema,
+
+  images: {
+    banner: { type: String, default: null }, // main hero image
+    gallery: { type: [String], default: [] }, // additional images
+  },
 });
 
-const floorSchema = new Schema({
-  floorId: { type: String, required: true }, // e.g. "F1", "F2"
-  name: String,
-  price: Number,
-  rooms: [roomSchema],
+const variablePriceSchema = new Schema({
+  roomId: {
+    type: String,
+    enum: roomIds,
+    required: true,
+  },
+
+  propertyId: {
+    type: String,
+    required: true,
+  },
+
+  pricePerNight: {
+    type: Number,
+    required: true,
+  },
+
+  reason: {
+    type: String,
+    required: true,
+  },
+
+  from: {
+    type: Date,
+    required: true,
+  },
+
+  to: {
+    type: Date,
+    required: true,
+  },
 });
 
-const villaSchema = new Schema({
-  name: { type: String, required: true },
-  price: Number, // whole-villa price
-  floors: [floorSchema],
-  isActive: { type: Boolean, default: true },
-});
+variablePriceSchema.index({ roomId: 1, from: 1, to: 1 });
 
-export const Villa = mongoose.model("villa", villaSchema);
+export const VariablePrice = mongoose.model(
+  "VariablePrice",
+  variablePriceSchema,
+);
+
+export const Room = mongoose.model("Room", roomSchema);
