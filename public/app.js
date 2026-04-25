@@ -1,764 +1,395 @@
-// ============================================================================
-// CONFIG & CONSTANTS
-// ============================================================================
-const API_BASE_URL = "https://anudinakuteera.com/api";
-const RAZORPAY_KEY_ID = "rzp_live_SFsR0f1WkY5r0J";
-
-// Villa pricing data (fetched from backend)
-let villaPricing = null;
-
-// ============================================================================
-// UTILITY FUNCTIONS
-// ============================================================================
-
-// Parse date to midnight local time
-function parseDateOnly(str) {
-  const [y, m, d] = str.split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
-
-// Calculate number of nights between dates
-function calculateNights(checkIn, checkOut) {
-  const diffTime = checkOut - checkIn;
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  return diffDays;
-}
-
-// Format date to YYYY-MM-DD
-function formatDate(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-// ============================================================================
-// API CALLS
-// ============================================================================
-
-// Fetch villa pricing data
-async function fetchVillaPricing() {
-  try {
-    const response = await fetch(`${API_BASE_URL}/villa/pricing`);
-    if (!response.ok) throw new Error("Failed to fetch pricing");
-    const data = await response.json();
-    villaPricing = data;
-    return data;
-  } catch (error) {
-    console.error("Error fetching pricing:", error);
-    showError("Failed to load pricing information. Please refresh the page.");
-    return null;
-  }
-}
-
-// Fetch booked dates for visual calendar
-async function fetchBookedDates(
-  targetType,
-  roomId,
-  floorId,
-  startDate,
-  endDate,
-) {
-  try {
-    const params = new URLSearchParams({
-      targetType,
-      startDate: formatDate(startDate),
-      endDate: formatDate(endDate),
-    });
-
-    if (targetType === "room" && roomId) params.append("roomId", roomId);
-    if (targetType === "floor" && floorId) params.append("floorId", floorId);
-
-    const response = await fetch(
-      `${API_BASE_URL}/booking/booked-dates?${params.toString()}`,
-    );
-
-    if (!response.ok) throw new Error("Failed to fetch booked dates");
-
-    const data = await response.json();
-    return data.bookedRanges || [];
-  } catch (error) {
-    console.error("Error fetching booked dates:", error);
-    return [];
-  }
-}
-
-// Check date availability
-async function checkAvailability(
-  checkIn,
-  checkOut,
-  targetType,
-  roomId,
-  floorId,
-) {
-  try {
-    const body = {
-      checkIn: formatDate(checkIn),
-      checkOut: formatDate(checkOut),
-      targetType,
-    };
-
-    if (targetType === "room" && roomId) body.roomId = roomId;
-    if (targetType === "floor" && floorId) body.floorId = floorId;
-
-    const response = await fetch(`${API_BASE_URL}/booking/check-availability`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    const data = await response.json();
-    return {
-      available: response.ok,
-      message: data.message,
-    };
-  } catch (error) {
-    console.error("Error checking availability:", error);
-    return {
-      available: false,
-      message: "Failed to check availability",
-    };
-  }
-}
-
-// Fetch price quote (base + seasonal rules) for selected dates and target
-async function fetchPriceQuote(checkIn, checkOut, targetType, roomId, floorId) {
-  try {
-    const body = {
-      checkIn: formatDate(checkIn),
-      checkOut: formatDate(checkOut),
-      targetType,
-    };
-    if (targetType === "room" && roomId) body.roomId = roomId;
-    if (targetType === "floor" && floorId) body.floorId = floorId;
-
-    const response = await fetch(`${API_BASE_URL}/booking/price-quote`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.message || "Failed to get price");
-    return data;
-  } catch (error) {
-    console.error("Error fetching price quote:", error);
-    return null;
-  }
-}
-
-// Create booking
-async function createBooking(bookingData) {
-  try {
-    const response = await fetch(`${API_BASE_URL}/booking/checkout`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(bookingData),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.message || "Booking failed");
-    }
-
-    return data;
-  } catch (error) {
-    console.error("Error creating booking:", error);
-    throw error;
-  }
-}
-
-// ============================================================================
-// PRICE CALCULATION (ESTIMATE ONLY - Backend calculates actual price)
-// ============================================================================
-
-function calculateEstimatedPrice(targetType, roomId, floorId, nights) {
-  if (!villaPricing) return 0;
-
-  let pricePerNight = 0;
-
-  if (targetType === "villa") {
-    pricePerNight = villaPricing.price;
-  } else if (targetType === "floor") {
-    const floor = villaPricing.floors.find((f) => f.floorId === floorId);
-    pricePerNight = floor ? floor.price : 0;
-  } else if (targetType === "room") {
-    for (const floor of villaPricing.floors) {
-      const room = floor.rooms.find((r) => r.roomId === roomId);
-      if (room) {
-        pricePerNight = room.price;
-        break;
-      }
-    }
-  }
-
-  return pricePerNight * nights;
-}
-
-// ============================================================================
-// DOM ELEMENTS
-// ============================================================================
+const API_BASE_URL = "https://api.varalabs.in";
+const PROPERTY_SLUG = "anudina-kuteera";
+const GUEST_JWT_KEY = "misty_guest_jwt";
+const GUEST_USER_KEY = "misty_guest_user";
 
 const bookingForm = document.getElementById("bookingForm");
-const guestDetailsFieldset = document.getElementById("guestDetails");
 const guestNameInput = document.getElementById("guestName");
 const guestEmailInput = document.getElementById("guestEmail");
 const guestPhoneInput = document.getElementById("guestPhone");
-
-const bookingTypeChips = document.querySelectorAll(".chip[data-type]");
 const roomSelect = document.getElementById("roomSelect");
-const floorSelect = document.getElementById("floorSelect");
-const roomOptionLabel = document.getElementById("roomOptionLabel");
-const floorOptionLabel = document.getElementById("floorOptionLabel");
-
 const checkInInput = document.getElementById("checkInDate");
 const checkOutInput = document.getElementById("checkOutDate");
-const nightCountDisplay = document.getElementById("nightCount");
-
 const adultCountInput = document.getElementById("adultCount");
 const childCountInput = document.getElementById("childCount");
-
 const summaryList = document.getElementById("summaryList");
 const totalPriceDisplay = document.getElementById("totalPrice");
 const depositPriceDisplay = document.getElementById("depositPrice");
 const formErrors = document.getElementById("formErrors");
+const nightCountDisplay = document.getElementById("nightCount");
+const availabilityIndicator = document.getElementById("availabilityIndicator");
+const roomGrid = document.getElementById("roomGrid");
+
+const authEmailInput = document.getElementById("authEmail");
+const authNameInput = document.getElementById("authName");
+const authPinInput = document.getElementById("authPin");
+const requestPinBtn = document.getElementById("requestPinBtn");
+const verifyPinBtn = document.getElementById("verifyPinBtn");
+const headerCartBtn = document.getElementById("headerCartBtn");
+const headerCartCount = document.getElementById("headerCartCount");
+const openAuthModalBtn = document.getElementById("openAuthModalBtn");
+const authEntryItem = document.getElementById("authEntryItem");
+const accountMenuWrap = document.getElementById("accountMenuWrap");
+const accountMenuBtn = document.getElementById("accountMenuBtn");
+const accountMenu = document.getElementById("accountMenu");
+const menuMyBookingsBtn = document.getElementById("menuMyBookingsBtn");
+const menuLogoutBtn = document.getElementById("menuLogoutBtn");
+const addToCartBtn = document.getElementById("addToCartBtn");
+const cartItemsList = document.getElementById("cartItemsList");
+const bookingsList = document.getElementById("bookingsList");
+
+const authModal = document.getElementById("authModal");
+const authModalBackdrop = document.getElementById("authModalBackdrop");
+const authModalCloseBtn = document.getElementById("authModalCloseBtn");
+const cartDrawer = document.getElementById("cartDrawer");
+const cartDrawerBackdrop = document.getElementById("cartDrawerBackdrop");
+const cartDrawerCloseBtn = document.getElementById("cartDrawerCloseBtn");
+const bookingsModal = document.getElementById("bookingsModal");
+const bookingsModalBackdrop = document.getElementById("bookingsModalBackdrop");
+const bookingsModalCloseBtn = document.getElementById("bookingsModalCloseBtn");
 
 const termsModal = document.getElementById("termsModal");
 const modalBackdrop = document.getElementById("modalBackdrop");
 const termsAgreeBtn = document.getElementById("termsAgreeBtn");
 const modalCloseBtn = document.querySelector("[data-close-modal]");
 
-// ============================================================================
-// STATE MANAGEMENT
-// ============================================================================
+let rooms = [];
+let roomsById = new Map();
+let selectedRoomId = "";
+let lastQuote = null;
+let pendingPaymentData = null;
+let siteGalleryImages = [];
 
-let currentBookingType = "room";
-let currentRoomId = "R1"; // Maps to 'robusta'
-let currentFloorId = "F1";
-let pendingBookingData = null;
-let lastPriceQuote = null; // Total, deposit, appliedRules (for terms modal)
-let bookedDateRanges = []; // Store booked dates for current selection
-let availabilityCheckTimeout = null; // Debounce availability checks
-
-// Room name to ID mapping
-const roomNameToId = {
-  robusta: "R1",
-  arabica: "R2",
-  excelsa: "R3",
-  liberica: "R4",
-};
-
-const floorNameToId = {
-  ground: "F1",
-  top: "F2",
-};
-
-// Guest limits per room/floor (max adults, max children) — matches backend validation
-// Min 1 adult mandatory (caretaker when children present)
-const ROOM_GUEST_LIMITS = {
-  R1: { maxAdults: 4, maxChildren: 2, total: 6 }, // Robusta — 6 total: 4a, 2c
-  R2: { maxAdults: 3, maxChildren: 1, total: 4 }, // Arabica — 4 total: 3a, 1c
-  R3: { maxAdults: 3, maxChildren: 1, total: 4 }, // Excelsa — Top floor
-  R4: { maxAdults: 3, maxChildren: 1, total: 4 }, // Liberica — Top floor
-};
-const FLOOR_GUEST_LIMITS = {
-  F1: { maxAdults: 7, maxChildren: 3, total: 10 }, // Ground floor — 10 total: 7a, 3c
-  F2: { maxAdults: 6, maxChildren: 2, total: 8 }, // First/Top floor — 8 total: 6a, 2c
-};
-const VILLA_GUEST_LIMITS = { maxAdults: 13, maxChildren: 5, total: 18 };
-
-function getGuestLimits() {
-  if (currentBookingType === "villa") return VILLA_GUEST_LIMITS;
-  if (currentBookingType === "floor")
-    return FLOOR_GUEST_LIMITS[currentFloorId] || VILLA_GUEST_LIMITS;
-  return ROOM_GUEST_LIMITS[currentRoomId] || { maxAdults: 4, maxChildren: 2 };
+function parseDateOnly(str) {
+  const [y, m, d] = str.split("-").map(Number);
+  return new Date(y, m - 1, d);
 }
 
-function applyGuestLimits() {
-  const limits = getGuestLimits();
-  const total = limits.total || limits.maxAdults + limits.maxChildren;
-  adultCountInput.max = String(limits.maxAdults);
-  adultCountInput.setAttribute("max", String(limits.maxAdults));
-  childCountInput.max = String(limits.maxChildren);
-  childCountInput.setAttribute("max", String(limits.maxChildren));
-  let adults = parseInt(adultCountInput.value, 10) || 0;
-  let children = parseInt(childCountInput.value, 10) || 0;
-  if (adults > limits.maxAdults) {
-    adults = limits.maxAdults;
-    adultCountInput.value = String(adults);
-  }
-  if (children > limits.maxChildren) {
-    children = limits.maxChildren;
-    childCountInput.value = String(children);
-  }
-  if (adults + children > total) {
-    if (children > 0) {
-      children = Math.min(children, total - adults, limits.maxChildren);
-      childCountInput.value = String(Math.max(0, children));
-    } else {
-      adults = Math.min(adults, total, limits.maxAdults);
-      adultCountInput.value = String(adults);
-    }
-  }
-  if (adults < 1) {
-    adultCountInput.value = "1";
-  }
-  const hintEl = document.getElementById("guestLimitHint");
-  if (hintEl) {
-    hintEl.textContent = `${total} total · max ${limits.maxAdults} adult${limits.maxAdults !== 1 ? "s" : ""}${limits.maxChildren ? `, ${limits.maxChildren} child${limits.maxChildren !== 1 ? "ren" : ""}` : ""}. Min 1 adult required.`;
+function formatDate(date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function calculateNights(checkIn, checkOut) {
+  return Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24));
+}
+
+function getGuestToken() {
+  return localStorage.getItem(GUEST_JWT_KEY) || "";
+}
+
+function getGuestUser() {
+  try {
+    const raw = localStorage.getItem(GUEST_USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
   }
 }
 
-// ============================================================================
-// AVAILABILITY CALENDAR FUNCTIONS
-// ============================================================================
+function clearGuestAuth() {
+  localStorage.removeItem(GUEST_JWT_KEY);
+  localStorage.removeItem(GUEST_USER_KEY);
+}
 
-// Check if a date falls within any booked range
-function isDateBooked(date) {
-  const checkDate = formatDate(date);
-
-  return bookedDateRanges.some((range) => {
-    const rangeStart = range.checkIn;
-    const rangeEnd = range.checkOut;
-    return checkDate >= rangeStart && checkDate < rangeEnd;
+async function apiRequest(path, { method = "GET", body, auth = false } = {}) {
+  const headers = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (auth) headers.Authorization = `Bearer ${getGuestToken()}`;
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-}
-
-// Update booked dates based on current selection
-async function updateBookedDates() {
-  const today = new Date();
-  const threeMonthsLater = new Date(today);
-  threeMonthsLater.setMonth(threeMonthsLater.getMonth() + 3);
-
-  bookedDateRanges = await fetchBookedDates(
-    currentBookingType,
-    currentRoomId,
-    currentFloorId,
-    today,
-    threeMonthsLater,
-  );
-
-  // Update date inputs to reflect availability
-  updateDateInputConstraints();
-}
-
-// Disable booked dates in date inputs
-function updateDateInputConstraints() {
-  // Note: HTML5 date inputs don't support disabling specific dates
-  // We'll add visual feedback and validation instead
-  // For full calendar UI, we'd need a calendar library
-}
-
-// Real-time availability check with debouncing
-function scheduleAvailabilityCheck() {
-  clearTimeout(availabilityCheckTimeout);
-
-  availabilityCheckTimeout = setTimeout(async () => {
-    const checkIn = checkInInput.value
-      ? parseDateOnly(checkInInput.value)
-      : null;
-    const checkOut = checkOutInput.value
-      ? parseDateOnly(checkOutInput.value)
-      : null;
-
-    if (!checkIn || !checkOut || checkOut <= checkIn) {
-      hideAvailabilityStatus();
-      return;
-    }
-
-    // Show loading state
-    showAvailabilityLoading();
-
-    const availability = await checkAvailability(
-      checkIn,
-      checkOut,
-      currentBookingType,
-      currentRoomId,
-      currentFloorId,
-    );
-
-    if (availability.available) {
-      showAvailabilitySuccess();
-    } else {
-      showAvailabilityError(availability.message);
-    }
-  }, 500); // Wait 500ms after user stops typing
-}
-
-function showAvailabilityLoading() {
-  const indicator = document.getElementById("availabilityIndicator");
-  if (indicator) {
-    indicator.className = "availability-indicator loading";
-    indicator.innerHTML =
-      '<span class="spinner">⏳</span> Checking availability...';
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
   }
-}
-
-function showAvailabilitySuccess() {
-  const indicator = document.getElementById("availabilityIndicator");
-  if (indicator) {
-    indicator.className = "availability-indicator success";
-    indicator.innerHTML = '<span class="check">✓</span> Dates available!';
+  if (response.status === 401 && auth) {
+    clearGuestAuth();
+    updateAuthStateUI();
+    throw new Error("Session expired. Please sign in again.");
   }
-}
-
-function showAvailabilityError(message) {
-  const indicator = document.getElementById("availabilityIndicator");
-  if (indicator) {
-    indicator.className = "availability-indicator error";
-    indicator.innerHTML = `<span class="cross">✗</span> ${message || "Dates not available"}`;
+  if (!response.ok) {
+    throw new Error(payload.message || `Request failed (${response.status})`);
   }
+  return { payload, status: response.status };
 }
-
-function hideAvailabilityStatus() {
-  const indicator = document.getElementById("availabilityIndicator");
-  if (indicator) {
-    indicator.className = "availability-indicator hidden";
-    indicator.innerHTML = "";
-  }
-}
-
-// ============================================================================
-// UI UPDATE FUNCTIONS
-// ============================================================================
 
 function showError(message) {
   formErrors.textContent = message;
   formErrors.classList.remove("hidden");
-
-  // Auto-hide after 5 seconds
-  setTimeout(() => {
-    formErrors.classList.add("hidden");
-  }, 5000);
 }
 
 function hideError() {
   formErrors.classList.add("hidden");
 }
 
-async function updateBookingSummary() {
-  const checkIn = checkInInput.value ? parseDateOnly(checkInInput.value) : null;
-  const checkOut = checkOutInput.value
-    ? parseDateOnly(checkOutInput.value)
-    : null;
+function setAvailabilityState(type, message) {
+  if (!availabilityIndicator) return;
+  if (!type) {
+    availabilityIndicator.className = "availability-indicator hidden";
+    availabilityIndicator.textContent = "";
+    return;
+  }
+  availabilityIndicator.className = `availability-indicator ${type}`;
+  availabilityIndicator.textContent = message;
+}
 
+function getSelectedRoom() {
+  return roomsById.get(selectedRoomId) || null;
+}
+
+function getRoomGallery(room) {
+  const gallery = Array.isArray(room?.images?.gallery) ? room.images.gallery : [];
+  if (room?.images?.banner) return [room.images.banner, ...gallery];
+  return gallery;
+}
+
+function renderRooms() {
+  if (!roomGrid) return;
+  roomGrid.innerHTML = "";
+  if (!rooms.length) {
+    roomGrid.innerHTML = "<p>No rooms available right now.</p>";
+    return;
+  }
+
+  rooms.forEach((room) => {
+    const card = document.createElement("article");
+    card.className = "room-card";
+    card.dataset.roomId = room.roomId;
+    const banner = room.images?.banner || "./assets/Background.jpeg";
+    card.innerHTML = `
+      <div class="room-media"><img src="${banner}" alt="${room.name}" loading="lazy" decoding="async" /></div>
+      <div class="room-body">
+        <h3>${room.name}</h3>
+        <p>${room.description || "Comfortable stay with curated amenities."}</p>
+      </div>
+    `;
+    roomGrid.appendChild(card);
+  });
+}
+
+function renderRoomSelect() {
+  if (!roomSelect) return;
+  roomSelect.innerHTML = rooms
+    .map((room) => `<option value="${room.roomId}">${room.name}</option>`)
+    .join("");
+  if (!selectedRoomId && rooms.length) selectedRoomId = rooms[0].roomId;
+  roomSelect.value = selectedRoomId;
+}
+
+async function loadRooms() {
+  const { payload } = await apiRequest(
+    `/api/public/properties/${PROPERTY_SLUG}/rooms`,
+  );
+  if (payload.success !== true || !Array.isArray(payload.rooms)) {
+    throw new Error("Invalid rooms response.");
+  }
+  rooms = payload.rooms.map((room) => ({
+    ...room,
+    roomId: room.roomId || `R${room.id}`,
+  }));
+  roomsById = new Map(rooms.map((room) => [room.roomId, room]));
+  selectedRoomId = rooms[0]?.roomId || "";
+  siteGalleryImages = Array.isArray(payload.siteGallery?.images)
+    ? payload.siteGallery.images
+    : [];
+  renderRooms();
+  renderRoomSelect();
+  renderSiteGalleryCarousel();
+}
+
+async function quoteRoom(checkIn, checkOut) {
+  const tokenExists = Boolean(getGuestToken());
+  const route = tokenExists
+    ? "/api/guest/bookings/quote"
+    : `/api/public/properties/${PROPERTY_SLUG}/quote`;
+  const { payload } = await apiRequest(route, {
+    method: "POST",
+    auth: tokenExists,
+    body: { roomId: selectedRoomId, checkIn, checkOut },
+  });
+  return payload;
+}
+
+function updateAuthStateUI() {
+  const guest = getGuestUser();
+  if (guest) {
+    authEntryItem?.classList.add("hidden");
+    accountMenuWrap?.classList.remove("hidden");
+    if (accountMenuBtn) accountMenuBtn.textContent = (guest.name || "G").charAt(0);
+  } else {
+    authEntryItem?.classList.remove("hidden");
+    accountMenuWrap?.classList.add("hidden");
+    accountMenu?.classList.add("hidden");
+  }
+}
+
+function renderCartItems(items) {
+  if (!cartItemsList) return;
+  cartItemsList.innerHTML = "";
+  if (!items.length) {
+    cartItemsList.innerHTML = "<li>Cart is empty.</li>";
+    return;
+  }
+  items.forEach((item) => {
+    const li = document.createElement("li");
+    li.className = "cart-item-row";
+    li.innerHTML = `
+      <span>${item.roomName || item.roomId} · ${item.checkIn} to ${item.checkOut}</span>
+      <button type="button" class="btn outline" data-cart-remove>Remove</button>
+    `;
+    li.querySelector("[data-cart-remove]")?.addEventListener("click", async () => {
+      try {
+        await apiRequest("/api/guest/bookings/cart/items", {
+          method: "DELETE",
+          auth: true,
+          body: {
+            roomId: item.roomId,
+            checkIn: item.checkIn,
+            checkOut: item.checkOut,
+          },
+        });
+        await loadCart();
+      } catch (error) {
+        showError(error.message);
+      }
+    });
+    cartItemsList.appendChild(li);
+  });
+}
+
+async function loadCart() {
+  if (!getGuestToken()) {
+    if (headerCartCount) headerCartCount.textContent = "0";
+    renderCartItems([]);
+    return;
+  }
+  const { payload } = await apiRequest("/api/guest/bookings/cart", { auth: true });
+  const roomInfo = Array.isArray(payload.roomInfo)
+    ? payload.roomInfo
+    : Array.isArray(payload.message)
+      ? payload.message
+      : [];
+  if (headerCartCount) headerCartCount.textContent = String(roomInfo.length);
+  renderCartItems(roomInfo);
+}
+
+async function addCurrentSelectionToCart() {
+  if (!getGuestToken()) {
+    throw new Error("Sign in first to add items to cart.");
+  }
+  if (!checkInInput.value || !checkOutInput.value) {
+    throw new Error("Select check-in and check-out dates first.");
+  }
+  await apiRequest("/api/guest/bookings/cart/items", {
+    method: "POST",
+    auth: true,
+    body: {
+      roomId: selectedRoomId,
+      checkIn: checkInInput.value,
+      checkOut: checkOutInput.value,
+      adults: Number(adultCountInput.value || 1),
+      children: Number(childCountInput.value || 0),
+    },
+  });
+  await loadCart();
+}
+
+async function loadBookings() {
+  if (!getGuestToken()) {
+    bookingsList.innerHTML = "<li>Sign in to view bookings.</li>";
+    return;
+  }
+  const { payload } = await apiRequest("/api/guest/bookings", { auth: true });
+  const rows = Array.isArray(payload.data) ? payload.data : [];
+  bookingsList.innerHTML = "";
+  if (!rows.length) {
+    bookingsList.innerHTML = "<li>No bookings found.</li>";
+    return;
+  }
+  rows.forEach((booking) => {
+    const firstRoom = booking.rooms?.[0];
+    const li = document.createElement("li");
+    li.textContent = `${booking.status || "pending"} · ₹${Number(booking.totalAmount || 0).toLocaleString("en-IN")} · ${firstRoom?.roomName || firstRoom?.roomId || "Room"}`;
+    bookingsList.appendChild(li);
+  });
+}
+
+async function updateBookingSummary() {
+  hideError();
+  const checkIn = checkInInput.value;
+  const checkOut = checkOutInput.value;
   if (!checkIn || !checkOut || checkOut <= checkIn) {
     summaryList.innerHTML = "<li>Select check-in and check-out dates</li>";
     totalPriceDisplay.textContent = "₹0";
     depositPriceDisplay.textContent = "₹0";
+    setAvailabilityState(null);
     return;
   }
 
-  const nights = calculateNights(checkIn, checkOut);
+  const nights = calculateNights(parseDateOnly(checkIn), parseDateOnly(checkOut));
   nightCountDisplay.textContent = `${nights} night${nights !== 1 ? "s" : ""}`;
-
-  const adults = parseInt(adultCountInput.value) || 0;
-  const children = parseInt(childCountInput.value) || 0;
-
-  // Fetch price from backend (includes seasonal pricing rules)
-  const quote = await fetchPriceQuote(
-    checkIn,
-    checkOut,
-    currentBookingType,
-    currentRoomId,
-    currentFloorId,
-  );
-
-  const totalPrice = quote
-    ? quote.totalPrice
-    : calculateEstimatedPrice(
-        currentBookingType,
-        currentRoomId,
-        currentFloorId,
-        nights,
-      );
-  const pricePerNight = quote ? quote.finalPrice : totalPrice / nights;
-  const depositAmount = quote
-    ? quote.depositAmount
-    : Math.ceil(totalPrice * 0.5);
-
-  // Build summary
-  let summaryHTML = "";
-
-  let bookingTypeText = "";
-  if (currentBookingType === "villa") {
-    bookingTypeText = "Entire Villa";
-  } else if (currentBookingType === "floor") {
-    const floorName = currentFloorId === "F1" ? "Ground Floor" : "Top Floor";
-    bookingTypeText = floorName;
-  } else {
-    const roomNames = {
-      R1: "Robusta",
-      R2: "Arabica",
-      R3: "Excelsa",
-      R4: "Liberica",
-    };
-    bookingTypeText = roomNames[currentRoomId];
-  }
-  summaryHTML += `<li><strong>Booking:</strong> ${bookingTypeText}</li>`;
-
-  summaryHTML += `<li><strong>Check-in:</strong> ${checkIn.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</li>`;
-  summaryHTML += `<li><strong>Check-out:</strong> ${checkOut.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</li>`;
-  summaryHTML += `<li><strong>Duration:</strong> ${nights} night${nights !== 1 ? "s" : ""}</li>`;
-
-  summaryHTML += `<li><strong>Guests:</strong> ${adults} adult${adults !== 1 ? "s" : ""}${children > 0 ? `, ${children} child${children !== 1 ? "ren" : ""}` : ""}</li>`;
-
-  summaryHTML += `<li><strong>Rate:</strong> ₹${pricePerNight.toLocaleString("en-IN")} × ${nights} night${nights !== 1 ? "s" : ""}</li>`;
-  if (quote && quote.appliedRules && quote.appliedRules.length > 0) {
-    const rulesText = quote.appliedRules
-      .map((r) =>
-        r.type === "fixed"
-          ? `${r.name} (+₹${r.modifier?.toLocaleString("en-IN")})`
-          : `${r.name} (+${r.modifier}%)`,
-      )
-      .join(", ");
-    summaryHTML += `<li><strong>Includes:</strong> ${rulesText}</li>`;
-  }
-
-  summaryList.innerHTML = summaryHTML;
-  totalPriceDisplay.textContent = `₹${totalPrice.toLocaleString("en-IN")}`;
-  depositPriceDisplay.textContent = `₹${depositAmount.toLocaleString("en-IN")}`;
-
-  // Store for terms modal (Reserve and Pay)
-  lastPriceQuote = quote
-    ? {
-        totalPrice,
-        depositAmount,
-        pricePerNight,
-        appliedRules: quote.appliedRules || [],
-      }
-    : null;
-}
-
-function updateBookingTypeUI() {
-  // Update chip states
-  bookingTypeChips.forEach((chip) => {
-    if (chip.dataset.type === currentBookingType) {
-      chip.classList.add("active");
-    } else {
-      chip.classList.remove("active");
-    }
-  });
-
-  // Show/hide appropriate selects
-  if (currentBookingType === "room") {
-    roomSelect.classList.remove("hidden");
-    roomOptionLabel.classList.remove("hidden");
-    floorSelect.classList.add("hidden");
-    floorOptionLabel.classList.add("hidden");
-  } else if (currentBookingType === "floor") {
-    roomSelect.classList.add("hidden");
-    roomOptionLabel.classList.add("hidden");
-    floorSelect.classList.remove("hidden");
-    floorOptionLabel.classList.remove("hidden");
-  } else {
-    roomSelect.classList.add("hidden");
-    roomOptionLabel.classList.add("hidden");
-    floorSelect.classList.add("hidden");
-    floorOptionLabel.classList.add("hidden");
-  }
-
-  applyGuestLimits();
-
-  // Fetch booked dates for new selection
-  updateBookedDates();
-
-  // Re-check availability if dates are selected
-  if (checkInInput.value && checkOutInput.value) {
-    scheduleAvailabilityCheck();
-  }
-
-  updateBookingSummary();
-}
-
-// ============================================================================
-// RAZORPAY INTEGRATION
-// ============================================================================
-
-function initRazorpay(orderData, bookingInfo) {
-  // Handle both response structures: orderData.data.order OR orderData.order
-  const order = orderData.data?.razorpayOrder || orderData.order;
-  console.log(order);
-
-  if (!order || !order.id || !order.amount) {
-    showError("Invalid order data received from server. Please try again.");
-    console.error("Order data:", orderData);
-    return;
-  }
-
-  // IMPORTANT: Always use amount from backend, never frontend calculation
-  const options = {
-    key: RAZORPAY_KEY_ID,
-    amount: order.amount, // Backend-calculated amount in paise
-    currency: order.currency || "INR",
-    name: "Anudina Kuteera",
-    description: `${bookingInfo.bookingTypeText} Booking`,
-    order_id: order.id,
-    prefill: {
-      name: bookingInfo.guestName,
-      email: bookingInfo.guestEmail,
-      contact: bookingInfo.guestPhone,
-    },
-    theme: {
-      color: "#2c5f2d",
-    },
-    handler: function (response) {
-      // Payment successful
-      handlePaymentSuccess(response, orderData);
-    },
-    modal: {
-      ondismiss: function () {
-        showError(
-          "Payment cancelled. Your booking is pending - complete payment within 2 hours to confirm.",
-        );
-      },
-      confirm_close: true, // Ask user before closing modal
-    },
-  };
-
-  const rzp = new Razorpay(options);
-  rzp.on("payment.failed", function (response) {
-    handlePaymentFailure(response, orderData);
-  });
-  rzp.open();
-}
-
-function handlePaymentSuccess(paymentResponse, bookingData) {
-  // Verify payment immediately (don't wait for webhook)
-  verifyPaymentWithBackend(paymentResponse).then((verified) => {
-    if (verified) {
-      // Show success message with booking details
-      const checkInDate = new Date(bookingData.data.checkIn).toLocaleDateString(
-        "en-IN",
-        {
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-        },
-      );
-      const checkOutDate = new Date(
-        bookingData.data.checkOut,
-      ).toLocaleDateString("en-IN", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      });
-
-      alert(`🎉 Payment Successful!
-
-Booking Confirmed for ${bookingData.data.name}
-
-📅 Check-in: ${checkInDate}
-📅 Check-out: ${checkOutDate}
-🔑 Access Token: ${bookingData.data.accessToken}
-
-A confirmation email has been sent to ${bookingData.data.email}
-
-Payment ID: ${paymentResponse.razorpay_payment_id}`);
-
-      // Reset form
-      bookingForm.reset();
-      guestDetailsFieldset.classList.add("hidden");
-      setMinDates();
-      updateBookingSummary();
-
-      // Scroll to top
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    } else {
-      showError(
-        "Payment successful but verification pending. Please contact us with your payment ID: " +
-          paymentResponse.razorpay_payment_id,
-      );
-    }
-  });
-}
-
-// Verify payment with backend
-async function verifyPaymentWithBackend(paymentResponse) {
+  setAvailabilityState("loading", "Checking availability...");
   try {
-    const response = await fetch(`${API_BASE_URL}/payment/verify`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        razorpay_order_id: paymentResponse.razorpay_order_id,
-        razorpay_payment_id: paymentResponse.razorpay_payment_id,
-        razorpay_signature: paymentResponse.razorpay_signature,
-      }),
-    });
+    const quote = await quoteRoom(checkIn, checkOut);
+    lastQuote = quote;
+    const room = getSelectedRoom();
+    const basePrice = Number(room?.price || 0);
+    const totalPrice = basePrice * nights;
+    const option =
+      quote.prepaidOptions?.find((row) => row.id === quote.primaryPrepaidOptionId) ||
+      quote.prepaidOptions?.[0];
+    const prepaidAmount = Number(option?.prepaidAmount || 0);
 
-    const data = await response.json();
-    return data.success;
+    summaryList.innerHTML = `
+      <li><strong>Room:</strong> ${room?.name || selectedRoomId}</li>
+      <li><strong>Check-in:</strong> ${checkIn}</li>
+      <li><strong>Check-out:</strong> ${checkOut}</li>
+      <li><strong>Guests:</strong> ${Number(adultCountInput.value || 1)} adult(s), ${Number(childCountInput.value || 0)} child(ren)</li>
+      <li><strong>Plan:</strong> ${option?.label || "Prepaid"}</li>
+    `;
+    totalPriceDisplay.textContent = `₹${totalPrice.toLocaleString("en-IN")}`;
+    depositPriceDisplay.textContent = `₹${prepaidAmount.toLocaleString("en-IN")}`;
+    setAvailabilityState("success", "Dates available.");
   } catch (error) {
-    console.error("Payment verification error:", error);
-    return false;
+    lastQuote = null;
+    totalPriceDisplay.textContent = "₹0";
+    depositPriceDisplay.textContent = "₹0";
+    summaryList.innerHTML = "<li>Unable to fetch quote for selected dates.</li>";
+    setAvailabilityState("error", error.message || "Dates not available.");
   }
 }
 
-function handlePaymentFailure(response, bookingData) {
-  const errorMsg =
-    response.error.description || response.error.reason || "Payment failed";
-
-  showError(`❌ Payment Failed: ${errorMsg}
-
-Your booking (${bookingData.data.accessToken}) is still pending. 
-You can retry payment within 2 hours, or contact us for assistance.`);
-
-  // Optionally: Provide a way to retry payment with same order
-  console.error("Payment failure details:", response.error);
-}
-
-// Optional: Check payment status for existing booking
-async function checkPaymentStatus(accessToken) {
-  try {
-    const response = await fetch(
-      `${API_BASE_URL}/booking/status/${accessToken}`,
-    );
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error("Error checking payment status:", error);
-    return null;
+function validateBookingForm() {
+  const guestName = guestNameInput.value.trim();
+  const guestEmail = guestEmailInput.value.trim();
+  const guestPhone = guestPhoneInput.value.trim();
+  if (!guestName || !guestEmail || !guestPhone) {
+    throw new Error("Please fill in guest details.");
+  }
+  if (!selectedRoomId) {
+    throw new Error("Please select a room.");
+  }
+  if (!checkInInput.value || !checkOutInput.value) {
+    throw new Error("Please select check-in and check-out dates.");
+  }
+  if (!lastQuote?.success) {
+    throw new Error("Quote is not available for selected dates.");
   }
 }
-
-// ============================================================================
-// MODAL FUNCTIONS
-// ============================================================================
 
 function showTermsModal() {
-  // Show price in modal (same as sidebar – includes seasonal rules)
   const totalEl = document.getElementById("termsTotalPrice");
   const depositEl = document.getElementById("termsDepositPrice");
-  const rulesEl = document.getElementById("termsAppliedRules");
-  if (totalEl && depositEl) {
-    if (lastPriceQuote) {
-      totalEl.textContent = `₹${lastPriceQuote.totalPrice.toLocaleString("en-IN")}`;
-      depositEl.textContent = `₹${lastPriceQuote.depositAmount.toLocaleString("en-IN")}`;
-      if (
-        rulesEl &&
-        lastPriceQuote.appliedRules &&
-        lastPriceQuote.appliedRules.length > 0
-      ) {
-        const rulesText = lastPriceQuote.appliedRules
-          .map((r) =>
-            r.type === "fixed"
-              ? `${r.name} (+₹${(r.modifier ?? 0).toLocaleString("en-IN")})`
-              : `${r.name} (+${r.modifier}%)`,
-          )
-          .join(", ");
-        rulesEl.textContent = `Includes: ${rulesText}`;
-        rulesEl.classList.remove("hidden");
-      } else if (rulesEl) {
-        rulesEl.classList.add("hidden");
-      }
-    } else {
-      totalEl.textContent = totalPriceDisplay?.textContent || "₹0";
-      depositEl.textContent = depositPriceDisplay?.textContent || "₹0";
-      if (rulesEl) rulesEl.classList.add("hidden");
-    }
-  }
-
+  totalEl.textContent = totalPriceDisplay.textContent;
+  depositEl.textContent = depositPriceDisplay.textContent;
   termsModal.classList.remove("hidden");
   modalBackdrop.classList.remove("hidden");
   document.body.style.overflow = "hidden";
@@ -770,534 +401,129 @@ function hideTermsModal() {
   document.body.style.overflow = "";
 }
 
-// ============================================================================
-// FORM VALIDATION & SUBMISSION
-// ============================================================================
-
-function validateForm() {
-  hideError();
-
-  // Guest details
-  const guestName = guestNameInput.value.trim();
-  const guestEmail = guestEmailInput.value.trim();
-  const guestPhone = guestPhoneInput.value.trim();
-
-  if (!guestName || !guestEmail || !guestPhone) {
-    showError("Please fill in all guest details");
-    return false;
-  }
-
-  // Email validation
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(guestEmail)) {
-    showError("Please enter a valid email address");
-    return false;
-  }
-
-  // Phone validation (basic)
-  const phoneRegex = /^[+]?[0-9]{10,15}$/;
-  if (!phoneRegex.test(guestPhone.replace(/\s/g, ""))) {
-    showError("Please enter a valid phone number");
-    return false;
-  }
-
-  // Dates
-  const checkIn = checkInInput.value ? parseDateOnly(checkInInput.value) : null;
-  const checkOut = checkOutInput.value
-    ? parseDateOnly(checkOutInput.value)
-    : null;
-  const today = parseDateOnly(formatDate(new Date()));
-
-  if (!checkIn || !checkOut) {
-    showError("Please select check-in and check-out dates");
-    return false;
-  }
-
-  if (checkIn < today) {
-    showError("Check-in date must be in the future");
-    return false;
-  }
-
-  if (checkOut <= checkIn) {
-    showError("Check-out date must be after check-in date");
-    return false;
-  }
-
-  const maxAdvance = new Date(today);
-  maxAdvance.setMonth(maxAdvance.getMonth() + 3);
-  if (checkIn > maxAdvance) {
-    showError("Bookings are accepted only up to 3 months in advance");
-    return false;
-  }
-
-  // Guest count
-  const adults = parseInt(adultCountInput.value, 10);
-  const children = parseInt(childCountInput.value, 10);
-  const limits = getGuestLimits();
-
-  if (isNaN(adults) || adults < 1) {
-    showError("At least 1 adult is required");
-    return false;
-  }
-
-  if (isNaN(children) || children < 0) {
-    showError("Invalid number of children");
-    return false;
-  }
-
-  if (adults > limits.maxAdults) {
-    showError(
-      `Maximum ${limits.maxAdults} adult${limits.maxAdults !== 1 ? "s" : ""} allowed for this selection.`,
-    );
-    return false;
-  }
-
-  if (children > limits.maxChildren) {
-    showError(
-      `Maximum ${limits.maxChildren} child${limits.maxChildren !== 1 ? "ren" : ""} allowed for this selection.`,
-    );
-    return false;
-  }
-
-  const total = limits.total || limits.maxAdults + limits.maxChildren;
-  if (adults + children > total) {
-    showError(
-      `Maximum ${total} guests total for this selection (${adults} adult${adults !== 1 ? "s" : ""} + ${children} child${children !== 1 ? "ren" : ""}).`,
-    );
-    return false;
-  }
-
-  return true;
+function renderSiteGalleryCarousel() {
+  const track = document.getElementById("adminShotsTrack");
+  if (!track) return;
+  const images = siteGalleryImages.length ? siteGalleryImages : ["./assets/Background.jpeg"];
+  track.innerHTML = images
+    .map(
+      (src, idx) => `
+      <div class="admin-shots-slide">
+        <img src="${src}" alt="Site gallery image ${idx + 1}" loading="lazy" decoding="async" />
+      </div>
+    `,
+    )
+    .join("");
+  initAdminShotsCarousel();
 }
 
-async function handleFormSubmit(e) {
-  e.preventDefault();
+function initAdminShotsCarousel() {
+  const track = document.getElementById("adminShotsTrack");
+  const prevBtn = document.querySelector(".admin-shots-prev");
+  const nextBtn = document.querySelector(".admin-shots-next");
+  if (!track || !prevBtn || !nextBtn) return;
 
-  if (!validateForm()) {
-    return;
+  const originals = Array.from(track.querySelectorAll(".admin-shots-slide"));
+  if (!originals.length) return;
+  originals.forEach((node) => track.appendChild(node.cloneNode(true)));
+
+  let currentIndex = 0;
+  const total = track.querySelectorAll(".admin-shots-slide").length;
+  const realCount = originals.length;
+  const autoMs = 3500;
+  let timer = null;
+  let locked = false;
+  const widthStep = 100 / total;
+  track.style.width = `${total * 100}%`;
+  track.style.transform = "translateX(0)";
+
+  function move(index, noAnim = false) {
+    track.style.transition = noAnim ? "none" : "transform 0.6s ease";
+    track.style.transform = `translateX(-${index * widthStep}%)`;
   }
 
-  // Prepare booking data
-  const checkIn = parseDateOnly(checkInInput.value);
-  const checkOut = parseDateOnly(checkOutInput.value);
-
-  const bookingData = {
-    targetType: currentBookingType,
-    checkIn: formatDate(checkIn),
-    checkOut: formatDate(checkOut),
-    guest: {
-      name: guestNameInput.value.trim(),
-      email: guestEmailInput.value.trim(),
-      phone: guestPhoneInput.value.trim(),
-      adults: parseInt(adultCountInput.value),
-      children: parseInt(childCountInput.value),
-    },
-  };
-
-  if (currentBookingType === "room") {
-    bookingData.roomId = currentRoomId;
-  } else if (currentBookingType === "floor") {
-    bookingData.floorId = currentFloorId;
-  }
-
-  // Store for later use
-  pendingBookingData = bookingData;
-
-  // Show terms modal
-  showTermsModal();
-}
-
-async function proceedWithBooking() {
-  hideTermsModal();
-
-  // Show loading state
-  const submitBtn = bookingForm.querySelector('button[type="submit"]');
-  const originalBtnText = submitBtn.textContent;
-  submitBtn.disabled = true;
-  submitBtn.textContent = "Processing...";
-
-  // Check availability first
-  const checkIn = parseDateOnly(pendingBookingData.checkIn);
-  const checkOut = parseDateOnly(pendingBookingData.checkOut);
-
-  const availability = await checkAvailability(
-    checkIn,
-    checkOut,
-    pendingBookingData.targetType,
-    pendingBookingData.roomId,
-    pendingBookingData.floorId,
-  );
-
-  if (!availability.available) {
-    showError(availability.message || "Selected dates are not available");
-    submitBtn.disabled = false;
-    submitBtn.textContent = originalBtnText;
-    return;
-  }
-
-  // Create booking
-  try {
-    const response = await createBooking(pendingBookingData);
-
-    // Get booking type text for display
-    let bookingTypeText = "";
-    if (pendingBookingData.targetType === "villa") {
-      bookingTypeText = "Entire Villa";
-    } else if (pendingBookingData.targetType === "floor") {
-      bookingTypeText =
-        pendingBookingData.floorId === "F1" ? "Ground Floor" : "Top Floor";
+  function next() {
+    if (locked) return;
+    locked = true;
+    currentIndex += 1;
+    move(currentIndex);
+    if (currentIndex === realCount) {
+      setTimeout(() => {
+        currentIndex = 0;
+        move(currentIndex, true);
+        locked = false;
+      }, 620);
     } else {
-      const roomNames = {
-        R1: "Robusta",
-        R2: "Arabica",
-        R3: "Excelsa",
-        R4: "Liberica",
-      };
-      bookingTypeText = roomNames[pendingBookingData.roomId];
+      setTimeout(() => {
+        locked = false;
+      }, 620);
     }
-
-    // Initialize Razorpay with backend response
-    initRazorpay(response, {
-      bookingTypeText,
-      guestName: pendingBookingData.guest.name,
-      guestEmail: pendingBookingData.guest.email,
-      guestPhone: pendingBookingData.guest.phone,
-    });
-  } catch (error) {
-    showError(error.message || "Failed to create booking. Please try again.");
-  } finally {
-    submitBtn.disabled = false;
-    submitBtn.textContent = originalBtnText;
+    restart();
   }
-}
 
-// ============================================================================
-// EVENT LISTENERS
-// ============================================================================
-
-// Booking type selection
-bookingTypeChips.forEach((chip) => {
-  chip.addEventListener("click", () => {
-    currentBookingType = chip.dataset.type;
-    updateBookingTypeUI();
-  });
-});
-
-// Room selection
-roomSelect.addEventListener("change", (e) => {
-  currentRoomId = roomNameToId[e.target.value];
-  applyGuestLimits();
-  updateBookedDates(); // Fetch booked dates for new room
-  if (checkInInput.value && checkOutInput.value) {
-    scheduleAvailabilityCheck(); // Re-check availability
-  }
-  updateBookingSummary();
-});
-
-// Floor selection
-floorSelect.addEventListener("change", (e) => {
-  currentFloorId = floorNameToId[e.target.value];
-  applyGuestLimits();
-  updateBookedDates(); // Fetch booked dates for new floor
-  if (checkInInput.value && checkOutInput.value) {
-    scheduleAvailabilityCheck(); // Re-check availability
-  }
-  updateBookingSummary();
-});
-
-// Date changes
-checkInInput.addEventListener("change", () => {
-  // Set minimum checkout date to day after checkin
-  if (checkInInput.value) {
-    const checkIn = parseDateOnly(checkInInput.value);
-    const minCheckOut = new Date(checkIn);
-    minCheckOut.setDate(minCheckOut.getDate() + 1);
-    checkOutInput.min = formatDate(minCheckOut);
-
-    // If checkout is before new minimum, reset it
-    if (checkOutInput.value && parseDateOnly(checkOutInput.value) <= checkIn) {
-      checkOutInput.value = "";
+  function prev() {
+    if (locked) return;
+    locked = true;
+    if (currentIndex === 0) {
+      currentIndex = realCount;
+      move(currentIndex, true);
+      track.offsetHeight;
     }
-  }
-  updateBookingSummary();
-  scheduleAvailabilityCheck(); // Check availability in real-time
-});
-
-checkOutInput.addEventListener("change", () => {
-  updateBookingSummary();
-  scheduleAvailabilityCheck(); // Check availability in real-time
-});
-
-// Guest count changes
-adultCountInput.addEventListener("change", () => {
-  applyGuestLimits();
-  updateBookingSummary();
-});
-childCountInput.addEventListener("change", () => {
-  applyGuestLimits();
-  updateBookingSummary();
-});
-adultCountInput.addEventListener("input", applyGuestLimits);
-childCountInput.addEventListener("input", applyGuestLimits);
-
-// Guest details - show fieldset when any input is focused OR when user interacts with booking form
-const bookingFormInputs = document.querySelectorAll(
-  "#bookingForm input, #bookingForm select, #bookingForm .chip",
-);
-
-// Show guest details when user interacts with any form element
-bookingFormInputs.forEach((input) => {
-  input.addEventListener("focus", () => {
-    guestDetailsFieldset.classList.remove("hidden");
-  });
-
-  input.addEventListener("click", () => {
-    guestDetailsFieldset.classList.remove("hidden");
-  });
-});
-
-// Also show when clicking on booking type chips
-bookingTypeChips.forEach((chip) => {
-  chip.addEventListener("click", () => {
-    guestDetailsFieldset.classList.remove("hidden");
-  });
-});
-
-// Show guest details if user scrolls to booking section
-const bookingSection = document.getElementById("booking");
-if (bookingSection) {
-  const observer = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          // User has scrolled to booking section, show guest details after a short delay
-          setTimeout(() => {
-            guestDetailsFieldset.classList.remove("hidden");
-          }, 1000);
-        }
-      });
-    },
-    { threshold: 0.3 },
-  );
-
-  observer.observe(bookingSection);
-}
-
-// Room cards: click to open full-window image viewer with slider arrows
-const roomPhotosViewer = document.getElementById("roomPhotosViewer");
-const roomPhotosBackdrop = document.getElementById("roomPhotosBackdrop");
-const roomViewerImage = document.getElementById("roomViewerImage");
-const roomViewerCaption = document.getElementById("roomViewerCaption");
-const roomViewerPrev = document.querySelector(".room-viewer-prev");
-const roomViewerNext = document.querySelector(".room-viewer-next");
-
-const roomCardTitles = {
-  robusta: "Robusta — Ground Floor",
-  arabica: "Arabica — Ground Floor",
-  excelsa: "Excelsa — Top Floor",
-  liberica: "Liberica — Top Floor",
-};
-
-const roomPhotosByKey = {
-  robusta: [
-    "./assets/Robusta(2).jpeg",
-    "./assets/Robusta(3).jpeg",
-    "./assets/Robusta(4).jpeg",
-    "./assets/Robusta(5).jpeg",
-  ],
-  arabica: [
-    "./assets/Arabica(1).jpeg",
-    "./assets/Arabica(2).jpeg",
-    "./assets/Arabica(3).jpeg",
-    "./assets/Arabica(4).jpeg",
-    "./assets/Arabica(6).jpeg",
-  ],
-  excelsa: [
-    "./assets/Excelsa(1).jpeg",
-    "./assets/Excelsa(2).jpeg",
-    "./assets/Excelsa(3).jpeg",
-    "./assets/Excelsa(5).jpeg",
-    "./assets/Excelsa(6).jpeg",
-  ],
-  liberica: [
-    "./assets/Liberica(2).jpeg",
-    "./assets/Liberica(3).jpeg",
-    "./assets/Liberica(4).jpeg",
-    "./assets/Liberica(5).jpeg",
-    "./assets/Liberica(6).jpeg",
-  ],
-};
-
-let currentRoomPhotos = [];
-let currentRoomPhotoIndex = 0;
-let currentRoomTitle = "";
-
-function showRoomViewerImage(index) {
-  if (!currentRoomPhotos.length) return;
-  currentRoomPhotoIndex =
-    (index + currentRoomPhotos.length) % currentRoomPhotos.length;
-  roomViewerImage.src = currentRoomPhotos[currentRoomPhotoIndex];
-  roomViewerImage.alt = currentRoomTitle;
-  roomViewerImage.classList.remove("hidden");
-  roomViewerPrev.classList.toggle("hidden", currentRoomPhotos.length <= 1);
-  roomViewerNext.classList.toggle("hidden", currentRoomPhotos.length <= 1);
-}
-
-function openRoomPhotosModal(roomKey) {
-  currentRoomTitle = roomCardTitles[roomKey] || roomKey;
-  currentRoomPhotos = roomPhotosByKey[roomKey] || [];
-  currentRoomPhotoIndex = 0;
-
-  if (currentRoomPhotos.length) {
-    roomViewerImage.classList.remove("hidden");
-    roomViewerCaption.classList.add("hidden");
-    showRoomViewerImage(0);
-  } else {
-    roomViewerImage.src = "";
-    roomViewerImage.alt = "";
-    roomViewerImage.classList.add("hidden");
-    roomViewerCaption.textContent =
-      "Photos for this room will appear here once added.";
-    roomViewerCaption.classList.remove("hidden");
-    roomViewerPrev.classList.add("hidden");
-    roomViewerNext.classList.add("hidden");
+    currentIndex -= 1;
+    move(currentIndex);
+    setTimeout(() => {
+      locked = false;
+    }, 620);
+    restart();
   }
 
-  roomPhotosViewer.classList.remove("hidden");
-  roomPhotosBackdrop.classList.remove("hidden");
-  document.body.style.overflow = "hidden";
-}
-
-function closeRoomPhotosModal() {
-  roomPhotosViewer.classList.add("hidden");
-  roomPhotosBackdrop.classList.add("hidden");
-  document.body.style.overflow = "";
-}
-
-function goToPrevImage() {
-  if (currentRoomPhotos.length > 1)
-    showRoomViewerImage(currentRoomPhotoIndex - 1);
-}
-
-function goToNextImage() {
-  if (currentRoomPhotos.length > 1)
-    showRoomViewerImage(currentRoomPhotoIndex + 1);
-}
-
-document.querySelectorAll(".room-card[data-room]").forEach((card) => {
-  card.addEventListener("click", () => {
-    openRoomPhotosModal(card.getAttribute("data-room"));
-  });
-});
-
-if (roomPhotosBackdrop)
-  roomPhotosBackdrop.addEventListener("click", closeRoomPhotosModal);
-document.querySelectorAll('[data-close-modal="roomPhotos"]').forEach((btn) => {
-  btn.addEventListener("click", closeRoomPhotosModal);
-});
-if (roomViewerPrev)
-  roomViewerPrev.addEventListener("click", (e) => {
-    e.stopPropagation();
-    goToPrevImage();
-  });
-if (roomViewerNext)
-  roomViewerNext.addEventListener("click", (e) => {
-    e.stopPropagation();
-    goToNextImage();
-  });
-
-// Form submission
-bookingForm.addEventListener("submit", handleFormSubmit);
-
-// Terms modal
-termsAgreeBtn.addEventListener("click", proceedWithBooking);
-modalCloseBtn.addEventListener("click", hideTermsModal);
-modalBackdrop.addEventListener("click", hideTermsModal);
-
-// ============================================================================
-// CUSTOM CURSOR (Desktop only)
-// ============================================================================
-
-function initCustomCursor() {
-  // Only enable on desktop with fine pointer
-  const hasFinPointer = window.matchMedia(
-    "(hover: hover) and (pointer: fine)",
-  ).matches;
-
-  if (!hasFinPointer) {
-    return; // Skip cursor on mobile/tablet
+  function restart() {
+    clearInterval(timer);
+    timer = setInterval(next, autoMs);
   }
 
-  const cursorDot = document.querySelector(".pointer-dot");
-  const cursorGlow = document.querySelector(".pointer-glow");
-  const cursorTrail = document.querySelector(".pointer-trail");
-
-  if (!cursorDot || !cursorGlow || !cursorTrail) {
-    return; // Elements not found
-  }
-
-  // Enable custom cursor
-  document.body.classList.add("custom-cursor-enabled");
-
-  let mouseX = 0;
-  let mouseY = 0;
-  let trailX = 0;
-  let trailY = 0;
-
-  // Track mouse position
-  document.addEventListener("mousemove", (e) => {
-    mouseX = e.clientX;
-    mouseY = e.clientY;
-
-    // Update dot and glow immediately
-    cursorDot.style.left = mouseX + "px";
-    cursorDot.style.top = mouseY + "px";
-    cursorGlow.style.left = mouseX + "px";
-    cursorGlow.style.top = mouseY + "px";
-  });
-
-  // Smooth trail animation
-  function animateTrail() {
-    const diffX = mouseX - trailX;
-    const diffY = mouseY - trailY;
-
-    trailX += diffX * 0.1;
-    trailY += diffY * 0.1;
-
-    cursorTrail.style.left = trailX + "px";
-    cursorTrail.style.top = trailY + "px";
-
-    requestAnimationFrame(animateTrail);
-  }
-  animateTrail();
-
-  // Highlight on hover over interactive elements
-  const interactiveElements = "a, button, .chip, input, select";
-
-  document.addEventListener(
-    "mouseenter",
-    (e) => {
-      if (e.target.matches(interactiveElements)) {
-        cursorGlow.classList.add("active");
-      }
-    },
-    true,
-  );
-
-  document.addEventListener(
-    "mouseleave",
-    (e) => {
-      if (e.target.matches(interactiveElements)) {
-        cursorGlow.classList.remove("active");
-      }
-    },
-    true,
-  );
+  prevBtn.onclick = prev;
+  nextBtn.onclick = next;
+  restart();
 }
 
-// ============================================================================
-// INITIALIZATION
-// ============================================================================
+function openModal(modal, backdrop) {
+  modal?.classList.remove("hidden");
+  backdrop?.classList.remove("hidden");
+}
+
+function closeModal(modal, backdrop) {
+  modal?.classList.add("hidden");
+  backdrop?.classList.add("hidden");
+}
+
+async function requestPin() {
+  const email = authEmailInput.value.trim();
+  const name = authNameInput.value.trim() || "Guest";
+  if (!email) throw new Error("Enter email to request PIN.");
+  await apiRequest("/api/guest-auth/request-pin", {
+    method: "POST",
+    body: { propertySlug: PROPERTY_SLUG, email, name },
+  });
+}
+
+async function verifyPin() {
+  const email = authEmailInput.value.trim();
+  const pin = authPinInput.value.trim();
+  const name = authNameInput.value.trim() || "Guest";
+  if (!email || !pin) throw new Error("Enter email and PIN.");
+  const { payload } = await apiRequest("/api/guest-auth/verify-pin", {
+    method: "POST",
+    body: { propertySlug: PROPERTY_SLUG, email, pin, name },
+  });
+  if (!payload.success || !payload.token || !payload.guest) {
+    throw new Error("Invalid verify PIN response.");
+  }
+  localStorage.setItem(GUEST_JWT_KEY, payload.token);
+  localStorage.setItem(GUEST_USER_KEY, JSON.stringify(payload.guest));
+  updateAuthStateUI();
+  await loadCart();
+}
 
 function setMinDates() {
   const tomorrow = new Date();
@@ -1306,136 +532,271 @@ function setMinDates() {
   const maxAdvance = new Date();
   maxAdvance.setMonth(maxAdvance.getMonth() + 3);
   checkInInput.max = formatDate(maxAdvance);
-
   const dayAfterTomorrow = new Date(tomorrow);
   dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 1);
   checkOutInput.min = formatDate(dayAfterTomorrow);
 }
 
-async function initApp() {
-  // Initialize custom cursor (desktop only)
-  initCustomCursor();
-
-  // Set minimum dates
-  setMinDates();
-
-  // Set current year in footer
-  const yearSpan = document.getElementById("year");
-  if (yearSpan) {
-    yearSpan.textContent = new Date().getFullYear();
+async function createPaymentOrder() {
+  const guestName = guestNameInput.value.trim();
+  const guestEmail = guestEmailInput.value.trim();
+  const guestPhone = guestPhoneInput.value.trim();
+  const prepaid =
+    lastQuote?.prepaidOptions?.find(
+      (row) => row.id === lastQuote.primaryPrepaidOptionId,
+    ) || lastQuote?.prepaidOptions?.[0];
+  const { payload, status } = await apiRequest("/api/guest/payments/order", {
+    method: "POST",
+    auth: true,
+    body: {
+      name: guestName,
+      email: guestEmail,
+      phone: guestPhone,
+      prepaidOptionId: prepaid?.id,
+      prepaidPercent: prepaid?.percent,
+    },
+  });
+  if (status !== 201) throw new Error("Payment order must return HTTP 201.");
+  if (!payload?.data?.razorpayOrderId || !payload?.data?.key) {
+    throw new Error("Payment order response missing razorpayOrderId/key.");
   }
+  return payload;
+}
 
-  // Fetch pricing data
-  await fetchVillaPricing();
+async function verifyPaymentWithBackend(paymentResponse) {
+  const { payload } = await apiRequest("/api/guest/payments/verify", {
+    method: "POST",
+    auth: true,
+    body: {
+      razorpay_order_id: paymentResponse.razorpay_order_id,
+      razorpay_payment_id: paymentResponse.razorpay_payment_id,
+      razorpay_signature: paymentResponse.razorpay_signature,
+    },
+  });
+  return payload.success === true;
+}
 
-  // Fetch initial booked dates for default selection (Robusta room)
-  await updateBookedDates();
+function launchRazorpay(orderPayload) {
+  const data = orderPayload.data;
+  const amount = Number(
+    data.expectedPrepaidAmount ?? data.totalAmount ?? 0,
+  );
+  const razorpayAmount = Math.max(0, Math.round(amount * 100));
+  const options = {
+    key: data.key,
+    amount: razorpayAmount,
+    currency: "INR",
+    name: "Misty Hut",
+    description: `Room ${selectedRoomId} booking`,
+    order_id: data.razorpayOrderId,
+    prefill: {
+      name: guestNameInput.value.trim(),
+      email: guestEmailInput.value.trim(),
+      contact: guestPhoneInput.value.trim(),
+    },
+    handler: async function (response) {
+      try {
+        const ok = await verifyPaymentWithBackend(response);
+        if (!ok) throw new Error("Payment verification failed.");
+        window.location.href = "/?payment=success";
+      } catch (error) {
+        showError(error.message || "Payment verification failed.");
+      }
+    },
+  };
+  const rzp = new Razorpay(options);
+  rzp.open();
+}
 
-  // Initial UI state
-  updateBookingTypeUI();
-  applyGuestLimits();
-  updateBookingSummary();
+async function handleFormSubmit(e) {
+  e.preventDefault();
+  hideError();
+  try {
+    validateBookingForm();
+    pendingPaymentData = {
+      roomId: selectedRoomId,
+      checkIn: checkInInput.value,
+      checkOut: checkOutInput.value,
+    };
+    showTermsModal();
+  } catch (error) {
+    showError(error.message);
+  }
+}
 
-  // Load Razorpay script
+async function proceedWithBooking() {
+  hideTermsModal();
+  try {
+    if (!getGuestToken()) {
+      throw new Error("Sign in first to continue with payment.");
+    }
+    await addCurrentSelectionToCart();
+    const order = await createPaymentOrder();
+    launchRazorpay(order);
+  } catch (error) {
+    showError(error.message || "Unable to start payment.");
+  }
+}
+
+function setupEvents() {
+  bookingForm.addEventListener("submit", handleFormSubmit);
+  termsAgreeBtn.addEventListener("click", proceedWithBooking);
+  modalCloseBtn.addEventListener("click", hideTermsModal);
+  modalBackdrop.addEventListener("click", hideTermsModal);
+  roomSelect.addEventListener("change", () => {
+    selectedRoomId = roomSelect.value;
+    updateBookingSummary();
+  });
+  checkInInput.addEventListener("change", () => {
+    if (checkInInput.value) {
+      const checkIn = parseDateOnly(checkInInput.value);
+      const minCheckOut = new Date(checkIn);
+      minCheckOut.setDate(minCheckOut.getDate() + 1);
+      checkOutInput.min = formatDate(minCheckOut);
+    }
+    updateBookingSummary();
+  });
+  checkOutInput.addEventListener("change", updateBookingSummary);
+  adultCountInput.addEventListener("change", updateBookingSummary);
+  childCountInput.addEventListener("change", updateBookingSummary);
+  requestPinBtn.addEventListener("click", async () => {
+    hideError();
+    try {
+      await requestPin();
+      showError("PIN sent. Check your email.");
+    } catch (error) {
+      showError(error.message);
+    }
+  });
+  verifyPinBtn.addEventListener("click", async () => {
+    hideError();
+    try {
+      await verifyPin();
+      await updateBookingSummary();
+      await loadBookings();
+      closeModal(authModal, authModalBackdrop);
+    } catch (error) {
+      showError(error.message);
+    }
+  });
+  menuLogoutBtn?.addEventListener("click", () => {
+    clearGuestAuth();
+    updateAuthStateUI();
+    if (headerCartCount) headerCartCount.textContent = "0";
+    renderCartItems([]);
+    bookingsList.innerHTML = "<li>Signed out.</li>";
+    accountMenu?.classList.add("hidden");
+  });
+  addToCartBtn.addEventListener("click", async () => {
+    hideError();
+    try {
+      await addCurrentSelectionToCart();
+      showError("Added to cart.");
+    } catch (error) {
+      showError(error.message);
+    }
+  });
+  menuMyBookingsBtn?.addEventListener("click", async () => {
+    hideError();
+    try {
+      await loadBookings();
+      openModal(bookingsModal, bookingsModalBackdrop);
+      accountMenu?.classList.add("hidden");
+    } catch (error) {
+      showError(error.message);
+    }
+  });
+  headerCartBtn?.addEventListener("click", async () => {
+    hideError();
+    try {
+      await loadCart();
+      openModal(cartDrawer, cartDrawerBackdrop);
+    } catch (error) {
+      showError(error.message);
+    }
+  });
+  openAuthModalBtn?.addEventListener("click", () => {
+    openModal(authModal, authModalBackdrop);
+  });
+  accountMenuBtn?.addEventListener("click", () => {
+    accountMenu?.classList.toggle("hidden");
+  });
+  document.addEventListener("click", (event) => {
+    if (
+      accountMenuWrap &&
+      !accountMenuWrap.contains(event.target) &&
+      !accountMenu?.classList.contains("hidden")
+    ) {
+      accountMenu.classList.add("hidden");
+    }
+  });
+  authModalCloseBtn?.addEventListener("click", () => closeModal(authModal, authModalBackdrop));
+  authModalBackdrop?.addEventListener("click", () => closeModal(authModal, authModalBackdrop));
+  cartDrawerCloseBtn?.addEventListener("click", () => closeModal(cartDrawer, cartDrawerBackdrop));
+  cartDrawerBackdrop?.addEventListener("click", () => closeModal(cartDrawer, cartDrawerBackdrop));
+  bookingsModalCloseBtn?.addEventListener("click", () =>
+    closeModal(bookingsModal, bookingsModalBackdrop),
+  );
+  bookingsModalBackdrop?.addEventListener("click", () =>
+    closeModal(bookingsModal, bookingsModalBackdrop),
+  );
+}
+
+function initCustomCursor() {
+  const hasFinePointer = window.matchMedia(
+    "(hover: hover) and (pointer: fine)",
+  ).matches;
+  if (!hasFinePointer) return;
+  const cursorDot = document.querySelector(".pointer-dot");
+  const cursorGlow = document.querySelector(".pointer-glow");
+  const cursorTrail = document.querySelector(".pointer-trail");
+  if (!cursorDot || !cursorGlow || !cursorTrail) return;
+  document.body.classList.add("custom-cursor-enabled");
+  let mouseX = 0;
+  let mouseY = 0;
+  let trailX = 0;
+  let trailY = 0;
+  document.addEventListener("mousemove", (event) => {
+    mouseX = event.clientX;
+    mouseY = event.clientY;
+    cursorDot.style.left = `${mouseX}px`;
+    cursorDot.style.top = `${mouseY}px`;
+    cursorGlow.style.left = `${mouseX}px`;
+    cursorGlow.style.top = `${mouseY}px`;
+  });
+  function animateTrail() {
+    trailX += (mouseX - trailX) * 0.1;
+    trailY += (mouseY - trailY) * 0.1;
+    cursorTrail.style.left = `${trailX}px`;
+    cursorTrail.style.top = `${trailY}px`;
+    requestAnimationFrame(animateTrail);
+  }
+  animateTrail();
+}
+
+async function initApp() {
+  initCustomCursor();
+  setMinDates();
+  const yearSpan = document.getElementById("year");
+  if (yearSpan) yearSpan.textContent = String(new Date().getFullYear());
+  setupEvents();
+  updateAuthStateUI();
+  try {
+    await loadRooms();
+    await loadCart();
+    await loadBookings();
+    await updateBookingSummary();
+  } catch (error) {
+    showError(error.message || "Failed to initialize booking app.");
+  }
   const script = document.createElement("script");
   script.src = "https://checkout.razorpay.com/v1/checkout.js";
   script.async = true;
   document.head.appendChild(script);
-
-  // Admin shots carousel (3.5s auto-scroll, loop, arrows)
-  initAdminShotsCarousel();
 }
 
-// Admin shots carousel: sliding motion, infinite scroll right, 3.5s auto-advance
-function initAdminShotsCarousel() {
-  const track = document.getElementById("adminShotsTrack");
-  const prevBtn = document.querySelector(".admin-shots-prev");
-  const nextBtn = document.querySelector(".admin-shots-next");
-  if (!track || !prevBtn || !nextBtn) return;
-
-  const slides = track.querySelectorAll(".admin-shots-slide");
-  const total = slides.length;
-  const realCount = total / 2; // first half is original, second half is clone for infinite scroll
-  if (total === 0 || realCount * 2 !== total) return;
-
-  let currentIndex = 0;
-  let autoInterval = null;
-  const AUTO_MS = 3500;
-
-  track.style.width = `${total * 100}%`;
-
-  function setTransition(enabled) {
-    track.style.transition = enabled ? "" : "none";
-  }
-
-  function updateTrack() {
-    track.style.transform = `translateX(-${currentIndex * (100 / total)}%)`;
-  }
-
-  function jumpTo(index) {
-    currentIndex = index;
-    setTransition(false);
-    updateTrack();
-    track.offsetHeight; // force reflow
-    setTransition(true);
-  }
-
-  function onTransitionEnd() {
-    if (currentIndex === realCount) jumpTo(0);
-  }
-
-  function next() {
-    if (currentIndex < total - 1) {
-      currentIndex++;
-      updateTrack();
-    } else {
-      jumpTo(0);
-    }
-    resetAuto();
-  }
-
-  function prev() {
-    if (currentIndex > 0) {
-      currentIndex--;
-      updateTrack();
-    } else {
-      jumpTo(total - 1);
-    }
-    resetAuto();
-  }
-
-  track.addEventListener("transitionend", onTransitionEnd);
-
-  function resetAuto() {
-    if (autoInterval) clearInterval(autoInterval);
-    autoInterval = setInterval(next, AUTO_MS);
-  }
-
-  prevBtn.addEventListener("click", prev);
-  nextBtn.addEventListener("click", next);
-  updateTrack();
-  autoInterval = setInterval(next, AUTO_MS);
-}
-
-// Start the app when DOM is ready
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", initApp);
 } else {
   initApp();
 }
-
-// ============================================================================
-// GALLERY & REVIEWS (Placeholder functions - implement as needed)
-// ============================================================================
-
-// Load gallery images (if you have a backend endpoint)
-async function loadGallery() {
-  // TODO: Implement gallery loading
-  const galleryGrid = document.getElementById("galleryGrid");
-  if (galleryGrid) {
-    galleryGrid.innerHTML = "<p>Gallery loading...</p>";
-  }
-}
-
-// Call these if needed
-// loadGallery();
