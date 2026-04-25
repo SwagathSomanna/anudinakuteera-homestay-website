@@ -1,12 +1,13 @@
-const authForm = document.getElementById('adminAuthForm');
-const pinInput = document.getElementById('adminPin');
-const panels = document.getElementById('adminPanels');
-const authCard = document.getElementById('adminAuthCard');
+const authForm = document.getElementById("adminAuthForm");
+const pinInput = document.getElementById("adminPin");
+const panels = document.getElementById("adminPanels");
+const authCard = document.getElementById("adminAuthCard");
 
-const pointerDot = document.querySelector('.pointer-dot');
-const pointerGlow = document.querySelector('.pointer-glow');
-const pointerTrail = document.querySelector('.pointer-trail');
-const interactiveSelectors = 'a, button, .chip, input, select, label, [role="button"]';
+const pointerDot = document.querySelector(".pointer-dot");
+const pointerGlow = document.querySelector(".pointer-glow");
+const pointerTrail = document.querySelector(".pointer-trail");
+const interactiveSelectors =
+  'a, button, .chip, input, select, label, [role="button"]';
 
 /* ---------- Custom cursor ---------- */
 if (pointerDot && pointerGlow && pointerTrail) {
@@ -17,10 +18,10 @@ if (pointerDot && pointerGlow && pointerTrail) {
     glowY: window.innerHeight / 2,
     trailX: window.innerWidth / 2,
     trailY: window.innerHeight / 2,
-    isOverInteractive: false
+    isOverInteractive: false,
   };
 
-  document.addEventListener('mousemove', (e) => {
+  document.addEventListener("mousemove", (e) => {
     pointerDot.style.left = `${e.clientX}px`;
     pointerDot.style.top = `${e.clientY}px`;
     cursorState.targetX = e.clientX;
@@ -28,16 +29,16 @@ if (pointerDot && pointerGlow && pointerTrail) {
 
     // Check if pointer is over interactive element
     const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
-    const isInteractive = elementBelow && (
-      elementBelow.matches(interactiveSelectors) ||
-      elementBelow.closest(interactiveSelectors)
-    );
+    const isInteractive =
+      elementBelow &&
+      (elementBelow.matches(interactiveSelectors) ||
+        elementBelow.closest(interactiveSelectors));
     cursorState.isOverInteractive = !!isInteractive;
-    
+
     if (isInteractive) {
-      pointerGlow.classList.add('active');
+      pointerGlow.classList.add("active");
     } else {
-      pointerGlow.classList.remove('active');
+      pointerGlow.classList.remove("active");
     }
   });
 
@@ -57,31 +58,31 @@ if (pointerDot && pointerGlow && pointerTrail) {
 }
 
 function showAdmin(loggedIn) {
-  panels.classList.toggle('hidden', !loggedIn);
-  authCard.classList.toggle('hidden', loggedIn);
+  panels.classList.toggle("hidden", !loggedIn);
+  authCard.classList.toggle("hidden", loggedIn);
 }
 
 async function login(pin) {
-  const res = await fetch('/api/admin/login', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pin })
+  const res = await fetch("/api/admin/login", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pin }),
   });
 
   const data = await res.json();
-  if (!res.ok) throw new Error(data.message || 'Login failed');
+  if (!res.ok) throw new Error(data.message || "Login failed");
 }
 
 async function checkSession() {
-  const res = await fetch('/api/admin/overview', {
-    credentials: 'include'
+  const res = await fetch("/api/admin/overview", {
+    credentials: "include",
   });
 
   return res.ok;
 }
 
-authForm.addEventListener('submit', async (e) => {
+authForm.addEventListener("submit", async (e) => {
   e.preventDefault();
 
   try {
@@ -94,7 +95,18 @@ authForm.addEventListener('submit', async (e) => {
 });
 
 // Initial load — silent check
-(async () => {
-  const ok = await checkSession();
-  showAdmin(ok);
-})();
+fetch("/api/admin/bookings", { credentials: "include" })
+  .then(function (res) {
+    if (res.ok) {
+      showView("adminDashboard");
+      renderBasePrices();
+      renderSeasonal();
+      loadBookings();
+      renderEvents();
+    } else {
+      showView("adminLogin");
+    }
+  })
+  .catch(function () {
+    showView("adminLogin");
+  });

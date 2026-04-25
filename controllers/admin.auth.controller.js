@@ -3,21 +3,12 @@ import { generateOTP, hashOTP } from "../utils/otp.util.js";
 import { sendAdminOTPEmail } from "../utils/resend.util.js";
 import jwt from "jsonwebtoken";
 
-const generateAccessToken = (res) => {
-  try {
-    return jwt.sign(
-      {
-        username: process.env.ADMIN_USERNAME,
-      },
-      process.env.ACCESSTOKEN_SECRET,
-      {
-        expiresIn: process.env.ACCESSTOKEN_EXPIRY,
-      },
-    );
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: "Something went wrong" });
-  }
+const generateAccessToken = () => {
+  return jwt.sign(
+    { username: process.env.ADMIN_USERNAME },
+    process.env.ACCESSTOKEN_SECRET,
+    { expiresIn: process.env.ACCESSTOKEN_EXPIRY || "24h" },
+  );
 };
 
 export const login = async (req, res) => {
@@ -96,12 +87,12 @@ export const verifyOTP = async (req, res) => {
     await record.save();
 
     const accessToken = generateAccessToken();
-
     return res
       .cookie("accessToken", accessToken, {
         httpOnly: true,
-        secure: true,
-        sameSite: "strict",
+        secure: false,
+        sameSite: "lax", // ← strict → lax
+        maxAge: 1000 * 60 * 60 * 24, // ← add this, 24h
       })
       .json({ message: "Login successful" });
   } catch (error) {
