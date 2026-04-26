@@ -99,6 +99,9 @@ let currentRoomTitle = "";
 let roomCartSelectedRoomId = "";
 let roomCartQuoteDebounce = null;
 let currentCartItems = [];
+let galleryCarouselInterval = null;
+let galleryCarouselIndex = 0;
+let galleryCarouselCount = 0;
 let lockedScrollY = 0;
 
 const ROOM_BANNER_PLACEHOLDER =
@@ -106,6 +109,7 @@ const ROOM_BANNER_PLACEHOLDER =
   encodeURIComponent(
     "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 640 360'><defs><linearGradient id='g' x1='0' x2='1' y1='0' y2='1'><stop offset='0%' stop-color='%23ece5dc'/><stop offset='100%' stop-color='%23d9c9b6'/></linearGradient></defs><rect width='640' height='360' fill='url(%23g)'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='%236b5a49' font-family='Arial, sans-serif' font-size='24'>Room image coming soon</text></svg>",
   );
+const SITE_GALLERY_PLACEHOLDER = "./assets/Background.jpeg";
 
 function parseDateOnly(str) {
   const [y, m, d] = str.split("-").map(Number);
@@ -130,6 +134,16 @@ function toDateOnlyText(value) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return String(value);
   return formatDate(parsed);
+}
+
+function normalizeImageUrl(value) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim().replace(/^['"]+|['"]+$/g, "");
+  if (!trimmed) return "";
+  const safe = trimmed.replace(/\s/g, "%20");
+  if (safe.startsWith("//")) return `https:${safe}`;
+  if (safe.startsWith("http://")) return safe.replace("http://", "https://");
+  return safe;
 }
 
 function getGuestToken() {
@@ -448,6 +462,8 @@ async function loadRooms() {
   selectedRoomId = rooms[0]?.roomId || "";
   siteGalleryImages = Array.isArray(payload.siteGallery?.images)
     ? payload.siteGallery.images
+        .map((src) => normalizeImageUrl(src))
+        .filter(Boolean)
     : [];
   renderRooms();
   renderRoomSelect();
@@ -700,7 +716,9 @@ function hideTermsModal() {
 function renderSiteGalleryCarousel() {
   const track = document.getElementById("adminShotsTrack");
   if (!track) return;
-  const images = siteGalleryImages.length ? siteGalleryImages : ["./assets/Background.jpeg"];
+  const images = siteGalleryImages.length
+    ? siteGalleryImages
+    : [SITE_GALLERY_PLACEHOLDER];
   track.innerHTML = images
     .map(
       (src, idx) => `
@@ -710,6 +728,19 @@ function renderSiteGalleryCarousel() {
     `,
     )
     .join("");
+
+  track.querySelectorAll(".admin-shots-slide img").forEach((img) => {
+    img.addEventListener(
+      "error",
+      () => {
+        if (img.dataset.fallbackApplied === "1") return;
+        img.dataset.fallbackApplied = "1";
+        img.src = SITE_GALLERY_PLACEHOLDER;
+      },
+      { once: true },
+    );
+  });
+
   initAdminShotsCarousel();
 }
 
@@ -853,68 +884,45 @@ function initAdminShotsCarousel() {
   const nextBtn = document.querySelector(".admin-shots-next");
   if (!track || !prevBtn || !nextBtn) return;
 
-  const originals = Array.from(track.querySelectorAll(".admin-shots-slide"));
-  if (!originals.length) return;
-  originals.forEach((node) => track.appendChild(node.cloneNode(true)));
+  const slides = Array.from(track.querySelectorAll(".admin-shots-slide"));
+  if (!slides.length) return;
 
-  let currentIndex = 0;
-  const total = track.querySelectorAll(".admin-shots-slide").length;
-  const realCount = originals.length;
-  const autoMs = 3500;
-  let timer = null;
-  let locked = false;
-  const widthStep = 100 / total;
-  track.style.width = `${total * 100}%`;
+  galleryCarouselCount = slides.length;
+  galleryCarouselIndex = 0;
+  track.style.width = "100%";
+  track.style.transition = "transform 0.6s ease";
   track.style.transform = "translateX(0)";
 
-  function move(index, noAnim = false) {
-    track.style.transition = noAnim ? "none" : "transform 0.6s ease";
-    track.style.transform = `translateX(-${index * widthStep}%)`;
+  slides.forEach((slide) => {
+    slide.style.flex = "0 0 100%";
+  });
+
+  function moveTo(index) {
+    galleryCarouselIndex =
+      (index + galleryCarouselCount) % galleryCarouselCount;
+    track.style.transform = `translateX(-${galleryCarouselIndex * 100}%)`;
   }
 
   function next() {
-    if (locked) return;
-    locked = true;
-    currentIndex += 1;
-    move(currentIndex);
-    if (currentIndex === realCount) {
-      setTimeout(() => {
-        currentIndex = 0;
-        move(currentIndex, true);
-        locked = false;
-      }, 620);
-    } else {
-      setTimeout(() => {
-        locked = false;
-      }, 620);
-    }
-    restart();
+    moveTo(galleryCarouselIndex + 1);
+    restartAuto();
   }
 
   function prev() {
-    if (locked) return;
-    locked = true;
-    if (currentIndex === 0) {
-      currentIndex = realCount;
-      move(currentIndex, true);
-      track.offsetHeight;
-    }
-    currentIndex -= 1;
-    move(currentIndex);
-    setTimeout(() => {
-      locked = false;
-    }, 620);
-    restart();
+    moveTo(galleryCarouselIndex - 1);
+    restartAuto();
   }
 
-  function restart() {
-    clearInterval(timer);
-    timer = setInterval(next, autoMs);
+  function restartAuto() {
+    if (galleryCarouselInterval) clearInterval(galleryCarouselInterval);
+    galleryCarouselInterval = setInterval(() => {
+      moveTo(galleryCarouselIndex + 1);
+    }, 3500);
   }
 
   prevBtn.onclick = prev;
   nextBtn.onclick = next;
-  restart();
+  restartAuto();
 }
 
 function updateBodyScrollLock() {
