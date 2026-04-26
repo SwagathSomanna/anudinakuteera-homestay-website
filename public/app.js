@@ -56,6 +56,11 @@ const cartTermsModalCloseBtn = document.getElementById("cartTermsModalCloseBtn")
 const cartTermsCheckbox = document.getElementById("cartTermsCheckbox");
 const cartTermsNotice = document.getElementById("cartTermsNotice");
 const cartTermsProceedBtn = document.getElementById("cartTermsProceedBtn");
+const cartTotalPrice = document.getElementById("cartTotalPrice");
+const cartPriceBreakdownToggleBtn = document.getElementById(
+  "cartPriceBreakdownToggleBtn",
+);
+const cartPriceBreakdownPanel = document.getElementById("cartPriceBreakdownPanel");
 const bookingsModal = document.getElementById("bookingsModal");
 const bookingsModalBackdrop = document.getElementById("bookingsModalBackdrop");
 const bookingsModalCloseBtn = document.getElementById("bookingsModalCloseBtn");
@@ -99,6 +104,7 @@ let currentRoomTitle = "";
 let roomCartSelectedRoomId = "";
 let roomCartQuoteDebounce = null;
 let currentCartItems = [];
+let currentCartPayload = null;
 let galleryCarouselInterval = null;
 let galleryCarouselIndex = 0;
 let galleryCarouselCount = 0;
@@ -227,6 +233,67 @@ function getSelectedRoom() {
 function normalizePricingData(rawQuote, fallbackRoomName = "Room") {
   if (!rawQuote || typeof rawQuote !== "object") return null;
   const roomInfo = Array.isArray(rawQuote.roomInfo) ? rawQuote.roomInfo : [];
+
+  // Preferred shape for cart: backend already returns cart-level payable totals.
+  const hasCartTotals =
+    Number.isFinite(Number(rawQuote.lowerPayableTotal)) &&
+    Number.isFinite(Number(rawQuote.upperPayableTotal));
+  if (hasCartTotals) {
+    const roomOptions = roomInfo.flatMap((room) =>
+      Array.isArray(room.prepaidOptions) ? room.prepaidOptions : [],
+    );
+    const optionMetaByPercent = new Map();
+    roomOptions.forEach((option) => {
+      const percent = Number(option.percent || 0);
+      if (!percent || optionMetaByPercent.has(percent)) return;
+      optionMetaByPercent.set(percent, {
+        label: option.label || `${percent}% Advance`,
+        refundAvailable: Boolean(option.refundAvailable),
+        isPrimary: Boolean(option.isPrimary),
+      });
+    });
+
+    const lowerPercent = Number(rawQuote.lowerPercent || 0);
+    const upperPercent = Number(rawQuote.upperPercent || 0);
+    const prepaidOptions = [];
+
+    if (lowerPercent > 0) {
+      const meta = optionMetaByPercent.get(lowerPercent) || {};
+      prepaidOptions.push({
+        id: "standard",
+        label: meta.label || "Standard",
+        percent: lowerPercent,
+        prepaidAmount: Number(rawQuote.lowerPayableTotal || 0),
+        refundAvailable: Boolean(meta.refundAvailable),
+        isPrimary: Boolean(meta.isPrimary),
+      });
+    }
+
+    if (upperPercent > 0) {
+      const meta = optionMetaByPercent.get(upperPercent) || {};
+      prepaidOptions.push({
+        id: "primary",
+        label: meta.label || "Primary",
+        percent: upperPercent,
+        prepaidAmount: Number(rawQuote.upperPayableTotal || 0),
+        refundAvailable:
+          meta.refundAvailable === undefined ? true : Boolean(meta.refundAvailable),
+        isPrimary: meta.isPrimary === undefined ? true : Boolean(meta.isPrimary),
+      });
+    }
+
+    const primary =
+      prepaidOptions.find((option) => option.isPrimary) ||
+      prepaidOptions[0] ||
+      null;
+
+    return {
+      totalPrice: Number(rawQuote.totalPrice || 0),
+      roomNames: roomInfo.map((room) => room.roomName || room.roomId || fallbackRoomName),
+      prepaidOptions,
+      primaryPrepaidId: primary?.id || null,
+    };
+  }
 
   // New shape: roomInfo[] with prepaid options per room
   if (roomInfo.length) {
@@ -386,13 +453,12 @@ async function refreshCartPaymentOptions() {
   cartPaymentOptionsContainer.innerHTML = "";
   cartSelectedPrepaidId = null;
   cartLastPricing = null;
-  if (!currentCartItems.length) return;
+  if (!currentCartItems.length || !currentCartPayload) return;
   const firstItem = currentCartItems[0];
-  const roomId = firstItem.roomId;
-  const checkIn = toDateOnlyText(firstItem.checkIn);
-  const checkOut = toDateOnlyText(firstItem.checkOut);
-  const quote = await quoteRoomById(roomId, checkIn, checkOut);
-  cartLastPricing = normalizePricingData(quote, firstItem.roomName || firstItem.roomId || roomId);
+  cartLastPricing = normalizePricingData(
+    currentCartPayload,
+    firstItem.roomName || firstItem.roomId || "Room",
+  );
   renderCartPaymentOptions(cartLastPricing);
 }
 
@@ -557,11 +623,57 @@ function renderCartItems(items) {
   });
 }
 
+function renderCartPricingSummary(payload) {
+  if (!cartTotalPrice || !cartPriceBreakdownPanel || !cartPriceBreakdownToggleBtn) return;
+  const roomInfo = Array.isArray(payload?.roomInfo) ? payload.roomInfo : [];
+  const total = Number(payload?.totalPrice || 0);
+  cartTotalPrice.textContent = `₹${total.toLocaleString("en-IN")}`;
+  cartPriceBreakdownPanel.classList.add("hidden");
+  cartPriceBreakdownToggleBtn.textContent = "View Price Breakdown";
+
+  if (!roomInfo.length) {
+    cartPriceBreakdownPanel.innerHTML = "";
+    cartPriceBreakdownToggleBtn.disabled = true;
+    return;
+  }
+
+  cartPriceBreakdownToggleBtn.disabled = false;
+  const roomSections = roomInfo
+    .map((room) => {
+      const roomName = room.roomName || room.roomId || "Room";
+      const roomPrice = Number(room.price || 0);
+      const rows = Array.isArray(room.priceBreakdown) ? room.priceBreakdown : [];
+      const breakdownRows = rows.length
+        ? rows
+            .map((row) => {
+              const dateText = toDateOnlyText(row.date);
+              const price = Number(row.price || 0).toLocaleString("en-IN");
+              const reason = row.reason ? ` (${row.reason})` : "";
+              return `<li>${dateText}: ₹${price}${reason}</li>`;
+            })
+            .join("")
+        : "<li>No daily breakdown provided.</li>";
+      return `
+        <div class="cart-breakdown-room">
+          <p class="cart-breakdown-room-title">
+            <strong>${roomName}</strong> - ₹${roomPrice.toLocaleString("en-IN")}
+          </p>
+          <ul class="cart-breakdown-list">${breakdownRows}</ul>
+        </div>
+      `;
+    })
+    .join("");
+
+  cartPriceBreakdownPanel.innerHTML = roomSections;
+}
+
 async function loadCart() {
   if (!getGuestToken()) {
     if (headerCartCount) headerCartCount.textContent = "0";
     currentCartItems = [];
+    currentCartPayload = null;
     renderCartItems([]);
+    renderCartPricingSummary(null);
     return;
   }
   const { payload } = await apiRequest("/api/guest/bookings/cart", { auth: true });
@@ -570,9 +682,11 @@ async function loadCart() {
     : Array.isArray(payload.message)
       ? payload.message
       : [];
+  currentCartPayload = payload;
   currentCartItems = roomInfo;
   if (headerCartCount) headerCartCount.textContent = String(roomInfo.length);
   renderCartItems(roomInfo);
+  renderCartPricingSummary(payload);
 }
 
 async function addCurrentSelectionToCart() {
@@ -1378,6 +1492,16 @@ function setupEvents() {
       }
     } finally {
       cartTermsProceedBtn.disabled = false;
+    }
+  });
+  cartPriceBreakdownToggleBtn?.addEventListener("click", () => {
+    if (!cartPriceBreakdownPanel) return;
+    const willShow = cartPriceBreakdownPanel.classList.contains("hidden");
+    cartPriceBreakdownPanel.classList.toggle("hidden", !willShow);
+    if (cartPriceBreakdownToggleBtn) {
+      cartPriceBreakdownToggleBtn.textContent = willShow
+        ? "Hide Price Breakdown"
+        : "View Price Breakdown";
     }
   });
 }
