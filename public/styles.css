@@ -268,26 +268,42 @@ h6 {
   position: absolute;
   right: 0;
   top: calc(100% + 0.5rem);
-  min-width: 150px;
-  background: #fff;
-  border-radius: 0.75rem;
+  min-width: 220px;
+  background: var(--accent);
+  border-radius: 0.85rem;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-  padding: 0.35rem;
-  z-index: 10;
+  padding: 0.45rem;
+  z-index: 10020;
+  overflow: hidden;
+  isolation: isolate;
+  display: grid;
+  gap: 0.35rem;
 }
 
 .account-menu-item {
   width: 100%;
   text-align: left;
+  display: block;
   border: none;
   background: transparent;
-  padding: 0.55rem 0.65rem;
+  padding: 0.7rem 0.85rem;
   border-radius: 0.5rem;
-  color: #1f1d1a;
+  color: #fff;
+  font-family: "Montserrat", sans-serif;
+  font-size: 1rem;
+  line-height: 1.2;
+  font-weight: 600;
+  white-space: nowrap;
+  min-height: 44px;
+  box-sizing: border-box;
 }
 
 .account-menu-item:hover {
-  background: rgba(154, 107, 49, 0.12);
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.account-menu-item + .account-menu-item {
+  margin-top: 0;
 }
 
 .nav a::after {
@@ -1580,6 +1596,9 @@ button:not(:disabled):hover,
 .btn:not(:disabled):hover {
   cursor: pointer;
   transition: all 0.2s ease;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 
 button:disabled,
@@ -1829,7 +1848,9 @@ footer a {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(10, 10, 10, 0.48);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   z-index: 9998;
   opacity: 0;
   visibility: hidden;
@@ -1876,10 +1897,105 @@ footer a {
   background: var(--card);
   border-radius: 1.2rem;
   padding: 2rem;
-  width: min(420px, calc(100% - 2rem));
+  width: min(620px, calc(100% - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
   box-shadow: 0 40px 80px rgba(0, 0, 0, 0.25);
   position: relative;
   animation: pop 0.25s ease;
+}
+
+/* Global modal lock: prevent background scroll + force blur context */
+html.modal-open,
+body.modal-open {
+  overflow: hidden !important;
+}
+
+/* Blur only site background while cart modal is open */
+body.cart-modal-open header,
+body.cart-modal-open main,
+body.cart-modal-open footer,
+body.cart-modal-open .whatsapp-float {
+  filter: blur(5px);
+  transition: filter 0.2s ease;
+}
+
+/* Keep pointer/cursor crisp inside cart modal context */
+body.cart-modal-open .cursor {
+  filter: none !important;
+}
+
+/* Cart modal premium layout tuning */
+#cartDrawer .modal-card {
+  width: min(760px, calc(100% - 1.5rem));
+  padding: 1.85rem;
+  border-radius: 1.35rem;
+}
+
+#cartDrawer .summary-list {
+  margin: 0 0 1.15rem;
+}
+
+#cartDrawer .cart-item-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+#cartDrawer .cart-item-row span {
+  min-width: 0;
+  line-height: 1.35;
+}
+
+#cartDrawer .grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+#cartDrawer input {
+  margin-bottom: 0.75rem;
+}
+
+/* Cart terms modal: narrower, taller, scrollable, better content alignment */
+#cartTermsModal .modal-card {
+  width: min(540px, calc(100% - 1.25rem));
+  max-height: calc(100vh - 1.25rem);
+  overflow-y: auto;
+}
+
+#cartTermsModal p {
+  margin: 0 0 0.65rem;
+  line-height: 1.55;
+}
+
+#cartTermsModal .modal-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  line-height: 1.55;
+}
+
+#cartTermsModal .modal-list li {
+  margin-bottom: 0.45rem;
+}
+
+.cart-terms-check-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0.85rem 0 1rem;
+  line-height: 1.45;
+}
+
+.cart-terms-check-row input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.cart-terms-check-row span {
+  display: block;
 }
 
 .modal-close {
@@ -1911,6 +2027,73 @@ footer a {
   color: var(--muted);
 }
 
+.payment-options-heading {
+  margin: 0.75rem 0 0.5rem;
+  font-size: 1rem;
+}
+
+.payment-options-list {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0 0 0.8rem;
+}
+
+#cartPaymentOptions {
+  margin-bottom: 0.4rem;
+}
+
+.payment-option-card {
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  padding: 0.75rem 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.payment-option-card:hover {
+  border-color: rgba(31, 29, 26, 0.45);
+}
+
+.payment-option-card.selected {
+  border-color: var(--accent);
+  background: rgba(154, 107, 49, 0.08);
+}
+
+.payment-option-title {
+  margin: 0 0 0.2rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.payment-option-meta {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.payment-option-meta.refundable {
+  color: #2e7d32;
+  font-weight: 600;
+}
+
+.payment-option-meta.non-refundable {
+  color: #b3261e;
+  font-weight: 600;
+}
+
+.payment-option-badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: #1f1d1a;
+  color: #fff;
+  font-weight: 500;
+  vertical-align: middle;
+}
+
 @keyframes pop {
   from {
     transform: translateY(10px);
@@ -1923,6 +2106,38 @@ footer a {
 }
 
 @media (max-width: 768px) {
+  .modal {
+    padding: 0.5rem;
+  }
+
+  .modal-card {
+    width: min(620px, calc(100vw - 1rem));
+    max-height: calc(100vh - 1.5rem);
+    border-radius: 1rem;
+    padding: 1.25rem;
+  }
+
+  #cartDrawer .modal-card {
+    width: calc(100vw - 0.85rem);
+    max-height: calc(100vh - 1rem);
+    padding: 1rem;
+    border-radius: 0.95rem;
+  }
+
+  #cartDrawer .cart-item-row {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  #cartDrawer .cart-item-row .btn {
+    width: 100%;
+  }
+
+  #cartTermsModal .modal-card {
+    width: calc(100vw - 1rem);
+    max-height: calc(100vh - 1rem);
+  }
+
   .hero {
     padding: 2rem clamp(1rem, 4vw, 2rem) 3rem;
     padding-top: max(2rem, env(safe-area-inset-top));

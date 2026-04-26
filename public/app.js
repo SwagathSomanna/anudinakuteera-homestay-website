@@ -49,6 +49,13 @@ const cartCheckoutEmailInput = document.getElementById("cartCheckoutEmail");
 const cartCheckoutPhoneInput = document.getElementById("cartCheckoutPhone");
 const cartCheckoutStatus = document.getElementById("cartCheckoutStatus");
 const cartCheckoutBtn = document.getElementById("cartCheckoutBtn");
+const cartPaymentOptionsContainer = document.getElementById("cartPaymentOptions");
+const cartTermsModal = document.getElementById("cartTermsModal");
+const cartTermsModalBackdrop = document.getElementById("cartTermsModalBackdrop");
+const cartTermsModalCloseBtn = document.getElementById("cartTermsModalCloseBtn");
+const cartTermsCheckbox = document.getElementById("cartTermsCheckbox");
+const cartTermsNotice = document.getElementById("cartTermsNotice");
+const cartTermsProceedBtn = document.getElementById("cartTermsProceedBtn");
 const bookingsModal = document.getElementById("bookingsModal");
 const bookingsModalBackdrop = document.getElementById("bookingsModalBackdrop");
 const bookingsModalCloseBtn = document.getElementById("bookingsModalCloseBtn");
@@ -74,11 +81,16 @@ const termsModal = document.getElementById("termsModal");
 const modalBackdrop = document.getElementById("modalBackdrop");
 const termsAgreeBtn = document.getElementById("termsAgreeBtn");
 const modalCloseBtn = document.querySelector("[data-close-modal]");
+const paymentOptionsContainer = document.getElementById("paymentOptions");
 
 let rooms = [];
 let roomsById = new Map();
 let selectedRoomId = "";
 let lastQuote = null;
+let lastPricing = null;
+let selectedPrepaidId = null;
+let cartSelectedPrepaidId = null;
+let cartLastPricing = null;
 let pendingPaymentData = null;
 let siteGalleryImages = [];
 let currentRoomPhotos = [];
@@ -87,6 +99,7 @@ let currentRoomTitle = "";
 let roomCartSelectedRoomId = "";
 let roomCartQuoteDebounce = null;
 let currentCartItems = [];
+let lockedScrollY = 0;
 
 const ROOM_BANNER_PLACEHOLDER =
   "data:image/svg+xml;utf8," +
@@ -195,6 +208,178 @@ function setAvailabilityState(type, message) {
 
 function getSelectedRoom() {
   return roomsById.get(selectedRoomId) || null;
+}
+
+function normalizePricingData(rawQuote, fallbackRoomName = "Room") {
+  if (!rawQuote || typeof rawQuote !== "object") return null;
+  const roomInfo = Array.isArray(rawQuote.roomInfo) ? rawQuote.roomInfo : [];
+
+  // New shape: roomInfo[] with prepaid options per room
+  if (roomInfo.length) {
+    const totalsByOptionId = new Map();
+    roomInfo.forEach((room) => {
+      const roomOptions = Array.isArray(room.prepaidOptions) ? room.prepaidOptions : [];
+      roomOptions.forEach((option) => {
+        const id = String(option.id || "");
+        if (!id) return;
+        const existing = totalsByOptionId.get(id) || {
+          id,
+          label: option.label || id,
+          percent: Number(option.percent || 0),
+          prepaidAmount: 0,
+          refundAvailable: true,
+          isPrimary: false,
+        };
+        existing.prepaidAmount += Number(option.prepaidAmount || 0);
+        existing.refundAvailable = existing.refundAvailable && Boolean(option.refundAvailable);
+        existing.isPrimary = existing.isPrimary || Boolean(option.isPrimary);
+        if (!existing.label && option.label) existing.label = option.label;
+        if (!existing.percent && option.percent) existing.percent = Number(option.percent);
+        totalsByOptionId.set(id, existing);
+      });
+    });
+
+    const prepaidOptions = Array.from(totalsByOptionId.values());
+    const primary =
+      prepaidOptions.find((option) => option.isPrimary) ||
+      prepaidOptions[0] ||
+      null;
+
+    return {
+      totalPrice:
+        Number(rawQuote.totalPrice || 0) ||
+        roomInfo.reduce((sum, room) => sum + Number(room.price || 0), 0),
+      roomNames: roomInfo.map((room) => room.roomName || room.roomId || fallbackRoomName),
+      prepaidOptions,
+      primaryPrepaidId: primary?.id || null,
+    };
+  }
+
+  // Legacy shape: single quote with top-level prepaidOptions
+  const legacyOptions = Array.isArray(rawQuote.prepaidOptions) ? rawQuote.prepaidOptions : [];
+  const legacyPrimary =
+    legacyOptions.find((option) => option.id === rawQuote.primaryPrepaidOptionId) ||
+    legacyOptions[0] ||
+    null;
+  return {
+    totalPrice: Number(rawQuote.totalPrice || 0),
+    roomNames: [fallbackRoomName],
+    prepaidOptions: legacyOptions.map((option) => ({
+      id: option.id,
+      label: option.label || option.id,
+      percent: Number(option.percent || 0),
+      prepaidAmount: Number(option.prepaidAmount || 0),
+      refundAvailable: Boolean(option.refundAvailable),
+      isPrimary: option.id === rawQuote.primaryPrepaidOptionId || Boolean(option.isPrimary),
+    })),
+    primaryPrepaidId: legacyPrimary?.id || null,
+  };
+}
+
+function updateTermsDepositFromSelection() {
+  const depositEl = document.getElementById("termsDepositPrice");
+  if (!depositEl || !lastPricing) return;
+  const selected =
+    lastPricing.prepaidOptions.find((option) => option.id === selectedPrepaidId) ||
+    lastPricing.prepaidOptions[0];
+  const payable = Number(selected?.prepaidAmount || 0);
+  depositEl.textContent = `₹${payable.toLocaleString("en-IN")}`;
+}
+
+function renderPaymentOptions(pricing) {
+  if (!paymentOptionsContainer) return;
+  paymentOptionsContainer.innerHTML = "";
+  if (!pricing?.prepaidOptions?.length) {
+    paymentOptionsContainer.innerHTML = "<p class=\"notice\">No payment options available.</p>";
+    selectedPrepaidId = null;
+    return;
+  }
+
+  if (!selectedPrepaidId) {
+    selectedPrepaidId = pricing.primaryPrepaidId || pricing.prepaidOptions[0]?.id || null;
+  }
+
+  pricing.prepaidOptions.forEach((option) => {
+    const card = document.createElement("div");
+    card.className = "payment-option-card";
+    if (option.id === selectedPrepaidId) card.classList.add("selected");
+
+    card.innerHTML = `
+      <p class="payment-option-title">
+        Pay ₹${Number(option.prepaidAmount || 0).toLocaleString("en-IN")} (${Number(option.percent || 0)}%)
+        ${option.isPrimary ? '<span class="payment-option-badge">Recommended</span>' : ""}
+      </p>
+      <p class="payment-option-meta ${option.refundAvailable ? "refundable" : "non-refundable"}">
+        ${option.refundAvailable ? "Refundable" : "Non-refundable"}
+      </p>
+    `;
+
+    card.addEventListener("click", () => {
+      selectedPrepaidId = option.id;
+      paymentOptionsContainer
+        .querySelectorAll(".payment-option-card")
+        .forEach((node) => node.classList.remove("selected"));
+      card.classList.add("selected");
+      updateTermsDepositFromSelection();
+    });
+
+    paymentOptionsContainer.appendChild(card);
+  });
+
+  updateTermsDepositFromSelection();
+}
+
+function renderCartPaymentOptions(pricing) {
+  if (!cartPaymentOptionsContainer) return;
+  cartPaymentOptionsContainer.innerHTML = "";
+  if (!pricing?.prepaidOptions?.length) {
+    cartPaymentOptionsContainer.innerHTML =
+      "<p class=\"notice\">No payment options available.</p>";
+    cartSelectedPrepaidId = null;
+    return;
+  }
+
+  if (!cartSelectedPrepaidId) {
+    cartSelectedPrepaidId = pricing.primaryPrepaidId || pricing.prepaidOptions[0]?.id || null;
+  }
+
+  pricing.prepaidOptions.forEach((option) => {
+    const card = document.createElement("div");
+    card.className = "payment-option-card";
+    if (option.id === cartSelectedPrepaidId) card.classList.add("selected");
+    card.innerHTML = `
+      <p class="payment-option-title">
+        Pay ₹${Number(option.prepaidAmount || 0).toLocaleString("en-IN")} (${Number(option.percent || 0)}%)
+        ${option.isPrimary ? '<span class="payment-option-badge">Recommended</span>' : ""}
+      </p>
+      <p class="payment-option-meta ${option.refundAvailable ? "refundable" : "non-refundable"}">
+        ${option.refundAvailable ? "Refundable" : "Non-refundable"}
+      </p>
+    `;
+    card.addEventListener("click", () => {
+      cartSelectedPrepaidId = option.id;
+      cartPaymentOptionsContainer
+        .querySelectorAll(".payment-option-card")
+        .forEach((node) => node.classList.remove("selected"));
+      card.classList.add("selected");
+    });
+    cartPaymentOptionsContainer.appendChild(card);
+  });
+}
+
+async function refreshCartPaymentOptions() {
+  if (!cartPaymentOptionsContainer) return;
+  cartPaymentOptionsContainer.innerHTML = "";
+  cartSelectedPrepaidId = null;
+  cartLastPricing = null;
+  if (!currentCartItems.length) return;
+  const firstItem = currentCartItems[0];
+  const roomId = firstItem.roomId;
+  const checkIn = toDateOnlyText(firstItem.checkIn);
+  const checkOut = toDateOnlyText(firstItem.checkOut);
+  const quote = await quoteRoomById(roomId, checkIn, checkOut);
+  cartLastPricing = normalizePricingData(quote, firstItem.roomName || firstItem.roomId || roomId);
+  renderCartPaymentOptions(cartLastPricing);
 }
 
 function getRoomGallery(room) {
@@ -446,15 +631,18 @@ async function updateBookingSummary() {
     const quote = await quoteRoom(checkIn, checkOut);
     lastQuote = quote;
     const room = getSelectedRoom();
-    const basePrice = Number(room?.price || 0);
-    const totalPrice = basePrice * nights;
+    lastPricing = normalizePricingData(quote, room?.name || selectedRoomId);
+    if (!lastPricing) throw new Error("Invalid pricing response.");
+    selectedPrepaidId = lastPricing.primaryPrepaidId;
+    const fallbackTotalPrice = Number(room?.price || 0) * nights;
+    const totalPrice = Number(lastPricing.totalPrice || fallbackTotalPrice || 0);
     const option =
-      quote.prepaidOptions?.find((row) => row.id === quote.primaryPrepaidOptionId) ||
-      quote.prepaidOptions?.[0];
+      lastPricing.prepaidOptions.find((row) => row.id === selectedPrepaidId) ||
+      lastPricing.prepaidOptions[0];
     const prepaidAmount = Number(option?.prepaidAmount || 0);
 
     summaryList.innerHTML = `
-      <li><strong>Room:</strong> ${room?.name || selectedRoomId}</li>
+      <li><strong>Room:</strong> ${lastPricing.roomNames.join(", ")}</li>
       <li><strong>Check-in:</strong> ${checkIn}</li>
       <li><strong>Check-out:</strong> ${checkOut}</li>
       <li><strong>Guests:</strong> ${Number(adultCountInput.value || 1)} adult(s), ${Number(childCountInput.value || 0)} child(ren)</li>
@@ -465,6 +653,8 @@ async function updateBookingSummary() {
     setAvailabilityState("success", "Dates available.");
   } catch (error) {
     lastQuote = null;
+    lastPricing = null;
+    selectedPrepaidId = null;
     totalPriceDisplay.textContent = "₹0";
     depositPriceDisplay.textContent = "₹0";
     summaryList.innerHTML = "<li>Unable to fetch quote for selected dates.</li>";
@@ -485,16 +675,17 @@ function validateBookingForm() {
   if (!checkInInput.value || !checkOutInput.value) {
     throw new Error("Please select check-in and check-out dates.");
   }
-  if (!lastQuote?.success) {
+  if (!lastPricing || !Array.isArray(lastPricing.prepaidOptions) || !lastPricing.prepaidOptions.length) {
     throw new Error("Quote is not available for selected dates.");
   }
 }
 
 function showTermsModal() {
   const totalEl = document.getElementById("termsTotalPrice");
-  const depositEl = document.getElementById("termsDepositPrice");
+  const rulesEl = document.getElementById("termsAppliedRules");
   totalEl.textContent = totalPriceDisplay.textContent;
-  depositEl.textContent = depositPriceDisplay.textContent;
+  if (rulesEl) rulesEl.classList.add("hidden");
+  renderPaymentOptions(lastPricing);
   termsModal.classList.remove("hidden");
   modalBackdrop.classList.remove("hidden");
   document.body.style.overflow = "hidden";
@@ -726,14 +917,55 @@ function initAdminShotsCarousel() {
   restart();
 }
 
+function updateBodyScrollLock() {
+  const hasOpenModal = Boolean(document.querySelector(".modal:not(.hidden)"));
+  const roomViewerOpen = roomPhotosViewer && !roomPhotosViewer.classList.contains("hidden");
+  const shouldLock = hasOpenModal || roomViewerOpen;
+  const htmlEl = document.documentElement;
+  const bodyEl = document.body;
+
+  if (shouldLock) {
+    if (!bodyEl.classList.contains("modal-open")) {
+      lockedScrollY = window.scrollY || window.pageYOffset || 0;
+      bodyEl.style.position = "fixed";
+      bodyEl.style.top = `-${lockedScrollY}px`;
+      bodyEl.style.left = "0";
+      bodyEl.style.right = "0";
+      bodyEl.style.width = "100%";
+    }
+    bodyEl.classList.add("modal-open");
+    htmlEl.classList.add("modal-open");
+    return;
+  }
+
+  if (bodyEl.classList.contains("modal-open")) {
+    bodyEl.style.position = "";
+    bodyEl.style.top = "";
+    bodyEl.style.left = "";
+    bodyEl.style.right = "";
+    bodyEl.style.width = "";
+    window.scrollTo(0, lockedScrollY);
+  }
+  bodyEl.classList.remove("modal-open");
+  htmlEl.classList.remove("modal-open");
+}
+
 function openModal(modal, backdrop) {
   modal?.classList.remove("hidden");
   backdrop?.classList.remove("hidden");
+  if (modal?.id === "cartDrawer") {
+    document.body.classList.add("cart-modal-open");
+  }
+  updateBodyScrollLock();
 }
 
 function closeModal(modal, backdrop) {
   modal?.classList.add("hidden");
   backdrop?.classList.add("hidden");
+  if (modal?.id === "cartDrawer") {
+    document.body.classList.remove("cart-modal-open");
+  }
+  updateBodyScrollLock();
 }
 
 async function requestPin() {
@@ -777,20 +1009,22 @@ function setMinDates() {
   checkOutInput.min = formatDate(dayAfterTomorrow);
 }
 
-async function createPaymentOrder({ guestName, guestEmail, guestPhone, quoteData }) {
-  const prepaid =
-    quoteData?.prepaidOptions?.find(
-      (row) => row.id === quoteData.primaryPrepaidOptionId,
-    ) || quoteData?.prepaidOptions?.[0];
+async function createPaymentOrder({
+  selectedPrepaidId,
+  guestName = "",
+  guestEmail = "",
+  guestPhone = "",
+}) {
   const { payload, status } = await apiRequest("/api/guest/payments/order", {
     method: "POST",
     auth: true,
     body: {
+      selectedPrepaidId,
+      // Backward compatibility: some servers still read prepaidOptionId
+      prepaidOptionId: selectedPrepaidId,
       name: guestName,
       email: guestEmail,
       phone: guestPhone,
-      prepaidOptionId: prepaid?.id,
-      prepaidPercent: prepaid?.percent,
     },
   });
   if (status !== 201) throw new Error("Payment order must return HTTP 201.");
@@ -867,18 +1101,24 @@ async function proceedWithBooking() {
     if (!getGuestToken()) {
       throw new Error("Sign in first to continue with payment.");
     }
+    if (!selectedPrepaidId) {
+      throw new Error("Please select a payment option.");
+    }
     await addCurrentSelectionToCart();
     const guest = getGuestUser() || {};
+    const guestName = guestNameInput?.value?.trim() || guest.name || "";
+    const guestEmail = guestEmailInput?.value?.trim() || guest.email || "";
+    const guestPhone = guestPhoneInput?.value?.trim() || "";
     const order = await createPaymentOrder({
-      guestName: guestNameInput?.value?.trim() || guest.name || "",
-      guestEmail: guestEmailInput?.value?.trim() || guest.email || "",
-      guestPhone: guestPhoneInput?.value?.trim() || "",
-      quoteData: lastQuote,
+      selectedPrepaidId,
+      guestName,
+      guestEmail,
+      guestPhone,
     });
     launchRazorpay(order, {
-      name: guestNameInput?.value?.trim() || guest.name || "",
-      email: guestEmailInput?.value?.trim() || guest.email || "",
-      phone: guestPhoneInput?.value?.trim() || "",
+      name: guestName,
+      email: guestEmail,
+      phone: guestPhone,
     });
   } catch (error) {
     showError(error.message || "Unable to start payment.");
@@ -908,14 +1148,26 @@ async function proceedCartCheckout() {
   const checkIn = toDateOnlyText(firstItem.checkIn);
   const checkOut = toDateOnlyText(firstItem.checkOut);
   selectedRoomId = roomId;
-  const quote = await quoteRoomById(roomId, checkIn, checkOut);
+  if (!cartSelectedPrepaidId) {
+    await refreshCartPaymentOptions();
+  }
+  if (!cartSelectedPrepaidId) {
+    throw new Error("Please select a payment option.");
+  }
   const order = await createPaymentOrder({
+    selectedPrepaidId: cartSelectedPrepaidId,
     guestName: details.name,
     guestEmail: details.email,
     guestPhone: details.phone,
-    quoteData: quote,
   });
+  closeModal(cartDrawer, cartDrawerBackdrop);
   launchRazorpay(order, details);
+}
+
+function openCartTermsModal() {
+  if (cartTermsCheckbox) cartTermsCheckbox.checked = false;
+  if (cartTermsNotice) cartTermsNotice.textContent = "";
+  openModal(cartTermsModal, cartTermsModalBackdrop);
 }
 
 function setupEvents() {
@@ -1004,6 +1256,7 @@ function setupEvents() {
       if (cartCheckoutEmailInput && !cartCheckoutEmailInput.value) {
         cartCheckoutEmailInput.value = guest.email || "";
       }
+      await refreshCartPaymentOptions();
       openModal(cartDrawer, cartDrawerBackdrop);
     } catch (error) {
       showError(error.message);
@@ -1028,6 +1281,12 @@ function setupEvents() {
   authModalBackdrop?.addEventListener("click", () => closeModal(authModal, authModalBackdrop));
   cartDrawerCloseBtn?.addEventListener("click", () => closeModal(cartDrawer, cartDrawerBackdrop));
   cartDrawerBackdrop?.addEventListener("click", () => closeModal(cartDrawer, cartDrawerBackdrop));
+  cartTermsModalCloseBtn?.addEventListener("click", () =>
+    closeModal(cartTermsModal, cartTermsModalBackdrop),
+  );
+  cartTermsModalBackdrop?.addEventListener("click", () =>
+    closeModal(cartTermsModal, cartTermsModalBackdrop),
+  );
   bookingsModalCloseBtn?.addEventListener("click", () =>
     closeModal(bookingsModal, bookingsModalBackdrop),
   );
@@ -1090,8 +1349,19 @@ function setupEvents() {
   });
   cartCheckoutBtn?.addEventListener("click", async () => {
     if (cartCheckoutStatus) cartCheckoutStatus.textContent = "";
+    openCartTermsModal();
+  });
+  cartTermsProceedBtn?.addEventListener("click", async () => {
+    if (cartTermsNotice) cartTermsNotice.textContent = "";
+    if (!cartTermsCheckbox?.checked) {
+      if (cartTermsNotice) {
+        cartTermsNotice.textContent = "Please accept Terms & Conditions to continue.";
+      }
+      return;
+    }
     try {
-      cartCheckoutBtn.disabled = true;
+      cartTermsProceedBtn.disabled = true;
+      closeModal(cartTermsModal, cartTermsModalBackdrop);
       await proceedCartCheckout();
     } catch (error) {
       if (cartCheckoutStatus) {
@@ -1099,7 +1369,7 @@ function setupEvents() {
           error.message || "Unable to proceed to checkout.";
       }
     } finally {
-      cartCheckoutBtn.disabled = false;
+      cartTermsProceedBtn.disabled = false;
     }
   });
 }

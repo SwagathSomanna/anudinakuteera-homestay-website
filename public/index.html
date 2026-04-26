@@ -467,9 +467,11 @@
           id="termsPriceSummary"
           aria-live="polite"
         >
-          Total stay: <strong id="termsTotalPrice">₹0</strong> · Pay now (50%):
+          Total stay: <strong id="termsTotalPrice">₹0</strong> · Pay now:
           <strong id="termsDepositPrice">₹0</strong>
         </p>
+        <h4 class="payment-options-heading">Choose Payment Option</h4>
+        <div id="paymentOptions" class="payment-options-list"></div>
         <p class="modal-price-rules hidden" id="termsAppliedRules"></p>
         <p>Please review and accept the villa terms:</p>
         <ul class="modal-list">
@@ -587,9 +589,36 @@
           >Phone Number
           <input type="tel" id="cartCheckoutPhone" placeholder="+91 98714 25151" />
         </label>
+        <h4 class="payment-options-heading">Choose Payment Option</h4>
+        <div id="cartPaymentOptions" class="payment-options-list"></div>
         <p class="notice" id="cartCheckoutStatus"></p>
         <button type="button" class="btn primary block" id="cartCheckoutBtn">
           Proceed To Checkout
+        </button>
+      </div>
+    </div>
+
+    <div id="cartTermsModalBackdrop" class="modal-backdrop hidden"></div>
+    <div class="modal hidden" id="cartTermsModal" role="dialog" aria-modal="true" aria-labelledby="cartTermsHeading">
+      <div class="modal-card">
+        <button class="modal-close" id="cartTermsModalCloseBtn">&times;</button>
+        <h3 id="cartTermsHeading">Before checkout</h3>
+        <p>Please review and accept the terms before proceeding:</p>
+        <ul class="modal-list">
+          <li>Check-in 2:00 pm · Check-out 11:00 am.</li>
+          <li>Bookings accepted up to 3 months in advance.</li>
+          <li>Selected prepaid amount is charged now; balance (if any) at property.</li>
+          <li>15+ days cancellation: eligible as per policy; after that no refund.</li>
+          <li>ID card mandatory at check-in.</li>
+          <li>Extra person charge and damage policy apply as listed on site terms.</li>
+        </ul>
+        <label class="cart-terms-check-row">
+          <input type="checkbox" id="cartTermsCheckbox" />
+          <span>I have read and accept the Terms &amp; Conditions.</span>
+        </label>
+        <p class="notice" id="cartTermsNotice"></p>
+        <button type="button" class="btn primary block" id="cartTermsProceedBtn">
+          Accept &amp; Continue To Checkout
         </button>
       </div>
     </div>
