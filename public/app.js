@@ -1,7 +1,7 @@
-const API_BASE_URL = "http://localhost:3000";
+const API_BASE_URL = "https://api.varalabs.in";
 const PROPERTY_SLUG = "anudina-kuteera";
-const GUEST_JWT_KEY = "misty_guest_jwt";
-const GUEST_USER_KEY = "misty_guest_user";
+const GUEST_JWT_KEY = "anudina_guest_jwt";
+const GUEST_USER_KEY = "anudina_guest_user";
 
 const bookingForm = document.getElementById("bookingForm");
 const guestNameInput = document.getElementById("guestName");
