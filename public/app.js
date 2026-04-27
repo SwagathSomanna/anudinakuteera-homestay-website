@@ -1,4 +1,4 @@
-const API_BASE_URL = "https://api.varalabs.in";
+const API_BASE_URL = "http://localhost:3000";
 const PROPERTY_SLUG = "anudina-kuteera";
 const GUEST_JWT_KEY = "anudina_guest_jwt";
 const GUEST_USER_KEY = "anudina_guest_user";
@@ -213,6 +213,20 @@ function hideError() {
   }
   if (!formErrors) return;
   formErrors.classList.add("hidden");
+}
+
+function setRoomCartQuoteStatus(message, tone = "neutral") {
+  if (!roomCartQuoteStatus) return;
+  roomCartQuoteStatus.textContent = message;
+  roomCartQuoteStatus.classList.remove(
+    "room-cart-quote-status-available",
+    "room-cart-quote-status-unavailable",
+  );
+  if (tone === "available") {
+    roomCartQuoteStatus.classList.add("room-cart-quote-status-available");
+  } else if (tone === "unavailable") {
+    roomCartQuoteStatus.classList.add("room-cart-quote-status-unavailable");
+  }
 }
 
 function setAvailabilityState(type, message) {
@@ -482,6 +496,12 @@ function renderRooms() {
     card.dataset.roomId = room.roomId;
     const hasBanner = Boolean(room.images?.banner);
     const banner = hasBanner ? room.images.banner : ROOM_BANNER_PLACEHOLDER;
+    const numericPrice = Number(room.price);
+    const hasValidPrice =
+      Number.isFinite(numericPrice) && numericPrice > 0;
+    const roomPriceText = hasValidPrice
+      ? `₹${numericPrice.toLocaleString("en-IN")} / night`
+      : "Price unavailable";
     card.innerHTML = `
       <div class="room-media">
         <img src="${banner}" alt="${room.name}" loading="lazy" decoding="async" />
@@ -490,6 +510,7 @@ function renderRooms() {
       <div class="room-body">
         <h3>${room.name}</h3>
         <p>${room.description || "Comfortable stay with curated amenities."}</p>
+        <p class="room-price${hasValidPrice ? "" : " room-price-unavailable"}">${roomPriceText}</p>
         <button type="button" class="btn outline block room-card-cart-btn" data-room-cart-add>
           Add To Cart
         </button>
@@ -925,7 +946,7 @@ function openRoomCartModal(roomId) {
   if (roomCartAdultsInput) roomCartAdultsInput.value = "2";
   if (roomCartChildrenInput) roomCartChildrenInput.value = "0";
   if (roomCartQuoteStatus) {
-    roomCartQuoteStatus.textContent = "Choose dates to check availability.";
+    setRoomCartQuoteStatus("Choose dates to check availability.");
   }
   setRoomCartMinDates();
   openModal(roomCartModal, roomCartModalBackdrop);
@@ -938,30 +959,76 @@ function scheduleRoomCartQuoteCheck() {
     const checkOut = roomCartCheckOutInput?.value;
     if (!roomCartSelectedRoomId || !checkIn || !checkOut || checkOut <= checkIn) {
       if (roomCartQuoteStatus) {
-        roomCartQuoteStatus.textContent =
-          "Choose valid dates to check availability.";
+        setRoomCartQuoteStatus("Choose valid dates to check availability.");
       }
       return;
     }
 
     if (roomCartQuoteStatus) {
-      roomCartQuoteStatus.textContent = "Checking availability and quote...";
+      setRoomCartQuoteStatus("Checking availability and quote...");
     }
     try {
       const quote = await quoteRoomById(roomCartSelectedRoomId, checkIn, checkOut);
-      const primary =
-        quote.prepaidOptions?.find(
-          (row) => row.id === quote.primaryPrepaidOptionId,
-        ) || quote.prepaidOptions?.[0];
+      const quoteOptions = Array.isArray(quote.prepaidOptions) ? quote.prepaidOptions : [];
+      const quoteRoomInfo = Array.isArray(quote.roomInfo) ? quote.roomInfo : [];
+      const firstRoom = quoteRoomInfo[0] || {};
+      const backendReservePercent = Number(
+        quote.lowerPercent ||
+          firstRoom.lowerPercent ||
+          quote.lowerPrepaidPercent ||
+          firstRoom.lowerPrepaidPercent ||
+          0,
+      );
+      let backendReserveAmount = Number(
+        quote.lowerPayableTotal ||
+          quote.lowerPrepaidAmount ||
+          firstRoom.lowerPayableTotal ||
+          firstRoom.lowerPrepaidAmount ||
+          0,
+      );
+      if (!(backendReservePercent > 0 && backendReserveAmount > 0)) {
+        const roomOptions = Array.isArray(firstRoom.prepaidOptions)
+          ? firstRoom.prepaidOptions
+          : [];
+        const reserveOption =
+          [...quoteOptions, ...roomOptions]
+            .filter((row) => Number(row?.percent || 0) > 0)
+            .sort((a, b) => Number(a.percent || 0) - Number(b.percent || 0))[0] ||
+          null;
+        backendReserveAmount = Number(
+          quote.lowerPayableTotal ||
+            quote.lowerPrepaidAmount ||
+            firstRoom.lowerPayableTotal ||
+            firstRoom.lowerPrepaidAmount ||
+            reserveOption?.prepaidAmount ||
+            0,
+        );
+        const fallbackPercent = Number(reserveOption?.percent || 0);
+        if (!(backendReservePercent > 0) && fallbackPercent > 0) {
+          // Keep same variable name usage below while only fixing missing lower-tier data.
+          setRoomCartQuoteStatus(
+            backendReserveAmount > 0
+              ? `Available. Reserve now at ₹${backendReserveAmount.toLocaleString("en-IN")} (${fallbackPercent}% advance).`
+              : "Available for selected dates.",
+            "available",
+          );
+          return;
+        }
+      }
       if (roomCartQuoteStatus) {
-        roomCartQuoteStatus.textContent = primary
-          ? `Available. Prepaid option: ${primary.label} (Rs ${Number(primary.prepaidAmount || 0).toLocaleString("en-IN")}).`
-          : "Available for selected dates.";
+        setRoomCartQuoteStatus(
+          backendReservePercent > 0
+            ? `Available. Reserve now at ₹${backendReserveAmount.toLocaleString("en-IN")} (${backendReservePercent}% advance).`
+            : "Available for selected dates.",
+          "available",
+        );
       }
     } catch (error) {
       if (roomCartQuoteStatus) {
-        roomCartQuoteStatus.textContent =
-          error.message || "Dates may be unavailable for this room.";
+        setRoomCartQuoteStatus(
+          error.message || "Not available for selected dates.",
+          "unavailable",
+        );
       }
     }
   }, 350);
