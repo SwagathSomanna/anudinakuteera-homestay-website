@@ -64,6 +64,8 @@ const cartPriceBreakdownPanel = document.getElementById("cartPriceBreakdownPanel
 const bookingsModal = document.getElementById("bookingsModal");
 const bookingsModalBackdrop = document.getElementById("bookingsModalBackdrop");
 const bookingsModalCloseBtn = document.getElementById("bookingsModalCloseBtn");
+const bookingsNotice = document.getElementById("bookingsNotice");
+const PREFERRED_PREPAID_KEY = "anudina_preferred_prepaid";
 const roomCartModal = document.getElementById("roomCartModal");
 const roomCartModalBackdrop = document.getElementById("roomCartModalBackdrop");
 const roomCartModalCloseBtn = document.getElementById("roomCartModalCloseBtn");
@@ -191,9 +193,94 @@ async function apiRequest(path, { method = "GET", body, auth = false } = {}) {
     throw new Error("Session expired. Please sign in again.");
   }
   if (!response.ok) {
-    throw new Error(payload.message || `Request failed (${response.status})`);
+    const error = new Error(
+      payload.message || `Request failed (${response.status})`,
+    );
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
   }
   return { payload, status: response.status };
+}
+
+function savePreferredPrepaid(option) {
+  if (!option?.id) return;
+  try {
+    sessionStorage.setItem(
+      PREFERRED_PREPAID_KEY,
+      JSON.stringify({
+        id: option.id,
+        percent: Number(option.percent || 0) || undefined,
+      }),
+    );
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
+function getPreferredPrepaid() {
+  try {
+    const raw = sessionStorage.getItem(PREFERRED_PREPAID_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatExpiresAt(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function bookingStatusLabel(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "requested") return "Requested";
+  if (normalized === "approved") return "Approved";
+  if (normalized === "confirmed") return "Confirmed";
+  if (normalized === "rejected") return "Declined";
+  if (normalized === "cancelled") return "Cancelled";
+  return status || "Pending";
+}
+
+function bookingStatusMessage(booking) {
+  const status = String(booking?.status || "").toLowerCase();
+  if (status === "requested") {
+    return "Request pending — waiting for property confirmation.";
+  }
+  if (status === "approved") {
+    const deadline = formatExpiresAt(booking.expiresAt);
+    return deadline
+      ? `Approved — complete payment by ${deadline}.`
+      : "Approved — complete payment to confirm your stay.";
+  }
+  if (status === "confirmed") {
+    return "Booking confirmed.";
+  }
+  if (status === "rejected") {
+    const reason = booking.rejectionReason
+      ? ` ${booking.rejectionReason}`
+      : "";
+    return `Request declined.${reason}`;
+  }
+  if (status === "cancelled") {
+    return "This booking was cancelled.";
+  }
+  return "";
+}
+
+function isPaymentWindowExpired(booking) {
+  if (!booking?.expiresAt) return false;
+  const expires = new Date(booking.expiresAt).getTime();
+  if (Number.isNaN(expires)) return false;
+  return Date.now() > expires;
 }
 
 function showError(message) {
@@ -411,6 +498,7 @@ function renderPaymentOptions(pricing) {
 
     card.addEventListener("click", () => {
       selectedPrepaidId = option.id;
+      savePreferredPrepaid(option);
       paymentOptionsContainer
         .querySelectorAll(".payment-option-card")
         .forEach((node) => node.classList.remove("selected"));
@@ -422,6 +510,10 @@ function renderPaymentOptions(pricing) {
   });
 
   updateTermsDepositFromSelection();
+  const selectedTermsOption =
+    pricing.prepaidOptions.find((row) => row.id === selectedPrepaidId) ||
+    pricing.prepaidOptions[0];
+  if (selectedTermsOption) savePreferredPrepaid(selectedTermsOption);
 }
 
 function renderCartPaymentOptions(pricing) {
@@ -453,6 +545,7 @@ function renderCartPaymentOptions(pricing) {
     `;
     card.addEventListener("click", () => {
       cartSelectedPrepaidId = option.id;
+      savePreferredPrepaid(option);
       cartPaymentOptionsContainer
         .querySelectorAll(".payment-option-card")
         .forEach((node) => node.classList.remove("selected"));
@@ -460,6 +553,11 @@ function renderCartPaymentOptions(pricing) {
     });
     cartPaymentOptionsContainer.appendChild(card);
   });
+
+  const selected =
+    pricing.prepaidOptions.find((row) => row.id === cartSelectedPrepaidId) ||
+    pricing.prepaidOptions[0];
+  if (selected) savePreferredPrepaid(selected);
 }
 
 async function refreshCartPaymentOptions() {
@@ -745,10 +843,102 @@ async function loadBookings() {
   }
   rows.forEach((booking) => {
     const firstRoom = booking.rooms?.[0];
+    const status = String(booking.status || "pending").toLowerCase();
+    const roomLabel =
+      firstRoom?.roomName || firstRoom?.roomId || "Room";
+    const amount = Number(booking.totalAmount || 0).toLocaleString("en-IN");
+    const checkIn = toDateOnlyText(
+      firstRoom?.checkIn || booking.checkIn || "",
+    );
+    const checkOut = toDateOnlyText(
+      firstRoom?.checkOut || booking.checkOut || "",
+    );
+    const dateLabel =
+      checkIn && checkOut ? `${checkIn} → ${checkOut}` : "";
     const li = document.createElement("li");
-    li.textContent = `${booking.status || "pending"} · ₹${Number(booking.totalAmount || 0).toLocaleString("en-IN")} · ${firstRoom?.roomName || firstRoom?.roomId || "Room"}`;
+    li.className = "booking-row guest-booking-row";
+    li.dataset.bookingId = booking._id || booking.id || "";
+    li.dataset.bookingStatus = status;
+
+    const canPay =
+      status === "approved" && !isPaymentWindowExpired(booking);
+    const expiredApproved =
+      status === "approved" && isPaymentWindowExpired(booking);
+    const statusMsg = expiredApproved
+      ? "Payment window expired. Submit a new booking request to continue."
+      : bookingStatusMessage(booking);
+
+    const main = document.createElement("div");
+    main.className = "booking-main";
+
+    const badge = document.createElement("span");
+    badge.className = `status-badge ${status}`;
+    badge.textContent = bookingStatusLabel(status);
+    main.appendChild(badge);
+
+    const title = document.createElement("p");
+    title.className = "guest-booking-title";
+    title.textContent = `${roomLabel} · ₹${amount}`;
+    main.appendChild(title);
+
+    if (dateLabel) {
+      const dates = document.createElement("p");
+      dates.className = "guest-booking-meta";
+      dates.textContent = dateLabel;
+      main.appendChild(dates);
+    }
+
+    if (statusMsg) {
+      const meta = document.createElement("p");
+      meta.className = "guest-booking-meta";
+      meta.textContent = statusMsg;
+      main.appendChild(meta);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "row-actions";
+
+    if (canPay) {
+      const payBtn = document.createElement("button");
+      payBtn.type = "button";
+      payBtn.className = "btn primary";
+      payBtn.textContent = "Pay now";
+      payBtn.addEventListener("click", async () => {
+        payBtn.disabled = true;
+        if (bookingsNotice) bookingsNotice.textContent = "Opening payment...";
+        try {
+          await payApprovedBooking(booking);
+          if (bookingsNotice) bookingsNotice.textContent = "";
+        } catch (error) {
+          if (bookingsNotice) {
+            bookingsNotice.textContent =
+              error.message || "Unable to start payment.";
+          }
+          payBtn.disabled = false;
+        }
+      });
+      actions.appendChild(payBtn);
+    } else if (expiredApproved) {
+      const hint = document.createElement("p");
+      hint.className = "guest-booking-meta";
+      hint.textContent = "Pay is unavailable — request again from your cart.";
+      actions.appendChild(hint);
+    }
+
+    li.appendChild(main);
+    li.appendChild(actions);
     bookingsList.appendChild(li);
   });
+}
+
+async function refreshBookingsIfOpen() {
+  if (!getGuestToken()) return;
+  if (!bookingsModal || bookingsModal.classList.contains("hidden")) return;
+  try {
+    await loadBookings();
+  } catch {
+    /* ignore background refresh errors */
+  }
 }
 
 async function updateBookingSummary() {
@@ -1198,29 +1388,57 @@ function setMinDates() {
   checkOutInput.min = formatDate(dayAfterTomorrow);
 }
 
-async function createPaymentOrder({
-  selectedPrepaidId,
-  guestName = "",
-  guestEmail = "",
-  guestPhone = "",
-}) {
-  const { payload, status } = await apiRequest("/api/guest/payments/order", {
+async function createBookingRequest({ name, email, phone }) {
+  const { payload } = await apiRequest("/api/guest/bookings/requests", {
     method: "POST",
     auth: true,
-    body: {
-      selectedPrepaidId,
-      // Backward compatibility: some servers still read prepaidOptionId
-      prepaidOptionId: selectedPrepaidId,
-      name: guestName,
-      email: guestEmail,
-      phone: guestPhone,
-    },
+    body: { name, email, phone },
   });
-  if (status !== 201) throw new Error("Payment order must return HTTP 201.");
-  if (!payload?.data?.razorpayOrderId || !payload?.data?.key) {
-    throw new Error("Payment order response missing razorpayOrderId/key.");
-  }
   return payload;
+}
+
+async function createPaymentOrder({
+  bookingId,
+  prepaidOptionId,
+  prepaidPercent,
+}) {
+  if (!bookingId) {
+    throw new Error("Missing booking to pay for.");
+  }
+  const body = { bookingId };
+  if (prepaidOptionId) body.prepaidOptionId = prepaidOptionId;
+  if (
+    prepaidPercent !== undefined &&
+    prepaidPercent !== null &&
+    prepaidPercent !== ""
+  ) {
+    body.prepaidPercent = Number(prepaidPercent);
+  }
+
+  try {
+    const { payload } = await apiRequest("/api/guest/payments/order", {
+      method: "POST",
+      auth: true,
+      body,
+    });
+    if (!payload?.data?.razorpayOrderId || !payload?.data?.key) {
+      throw new Error("Payment order response missing razorpayOrderId/key.");
+    }
+    return payload;
+  } catch (error) {
+    if (error.status === 410) {
+      throw new Error(
+        "Payment window expired. Please submit a new booking request.",
+      );
+    }
+    if (error.status === 400) {
+      throw new Error(
+        error.message ||
+          "This booking is not payable yet. Wait for property confirmation.",
+      );
+    }
+    throw error;
+  }
 }
 
 async function verifyPaymentWithBackend(paymentResponse) {
@@ -1236,7 +1454,7 @@ async function verifyPaymentWithBackend(paymentResponse) {
   return payload.success === true;
 }
 
-function launchRazorpay(orderPayload, prefill = {}) {
+function launchRazorpay(orderPayload, prefill = {}, description = "Room booking") {
   const data = orderPayload.data;
   const amount = Number(
     data.expectedPrepaidAmount ?? data.totalAmount ?? 0,
@@ -1247,7 +1465,7 @@ function launchRazorpay(orderPayload, prefill = {}) {
     amount: razorpayAmount,
     currency: "INR",
     name: "Anudina Kuteera",
-    description: `Room ${selectedRoomId} booking`,
+    description,
     order_id: data.razorpayOrderId,
     prefill: {
       name: prefill.name || "",
@@ -1266,6 +1484,67 @@ function launchRazorpay(orderPayload, prefill = {}) {
   };
   const rzp = new Razorpay(options);
   rzp.open();
+}
+
+function resolvePrepaidForPayment(booking) {
+  const preferred = getPreferredPrepaid();
+  const bookingOptions = Array.isArray(booking?.prepaidOptions)
+    ? booking.prepaidOptions
+    : [];
+  if (preferred?.id) {
+    const match = bookingOptions.find(
+      (option) => String(option.id) === String(preferred.id),
+    );
+    if (match || !bookingOptions.length) {
+      return {
+        prepaidOptionId: preferred.id,
+        prepaidPercent: preferred.percent,
+      };
+    }
+  }
+  const primary =
+    bookingOptions.find((option) => option.isPrimary) || bookingOptions[0];
+  if (primary?.id) {
+    return {
+      prepaidOptionId: primary.id,
+      prepaidPercent: Number(primary.percent || 0) || undefined,
+    };
+  }
+  if (preferred?.percent) {
+    return { prepaidPercent: preferred.percent };
+  }
+  return {};
+}
+
+async function payApprovedBooking(booking) {
+  const bookingId = booking?._id || booking?.id;
+  if (!bookingId) throw new Error("Missing booking id.");
+  if (String(booking.status || "").toLowerCase() !== "approved") {
+    throw new Error("Only approved bookings can be paid.");
+  }
+  if (isPaymentWindowExpired(booking)) {
+    throw new Error(
+      "Payment window expired. Please submit a new booking request.",
+    );
+  }
+
+  const prepaid = resolvePrepaidForPayment(booking);
+  const order = await createPaymentOrder({
+    bookingId,
+    ...prepaid,
+  });
+  const guest = getGuestUser() || {};
+  const roomName =
+    booking.rooms?.[0]?.roomName || booking.rooms?.[0]?.roomId || "Room";
+  launchRazorpay(
+    order,
+    {
+      name: guest.name || "",
+      email: guest.email || "",
+      phone: guest.phone || "",
+    },
+    `${roomName} booking`,
+  );
 }
 
 async function handleFormSubmit(e) {
@@ -1288,29 +1567,36 @@ async function proceedWithBooking() {
   hideTermsModal();
   try {
     if (!getGuestToken()) {
-      throw new Error("Sign in first to continue with payment.");
+      throw new Error("Sign in first to submit a booking request.");
     }
-    if (!selectedPrepaidId) {
-      throw new Error("Please select a payment option.");
+    if (selectedPrepaidId && lastPricing?.prepaidOptions?.length) {
+      const option =
+        lastPricing.prepaidOptions.find((row) => row.id === selectedPrepaidId) ||
+        lastPricing.prepaidOptions[0];
+      if (option) savePreferredPrepaid(option);
     }
     await addCurrentSelectionToCart();
     const guest = getGuestUser() || {};
     const guestName = guestNameInput?.value?.trim() || guest.name || "";
     const guestEmail = guestEmailInput?.value?.trim() || guest.email || "";
     const guestPhone = guestPhoneInput?.value?.trim() || "";
-    const order = await createPaymentOrder({
-      selectedPrepaidId,
-      guestName,
-      guestEmail,
-      guestPhone,
-    });
-    launchRazorpay(order, {
+    if (!guestName || !guestEmail || !guestPhone) {
+      throw new Error("Please fill name, email, and phone.");
+    }
+    await createBookingRequest({
       name: guestName,
       email: guestEmail,
       phone: guestPhone,
     });
+    await loadCart();
+    if (bookingsNotice) {
+      bookingsNotice.textContent =
+        "Request submitted. Waiting for property confirmation.";
+    }
+    await loadBookings();
+    openModal(bookingsModal, bookingsModalBackdrop);
   } catch (error) {
-    showError(error.message || "Unable to start payment.");
+    showError(error.message || "Unable to submit booking request.");
   }
 }
 
@@ -1332,25 +1618,26 @@ async function proceedCartCheckout() {
     throw new Error("Your cart is empty.");
   }
   const details = validateCartCheckoutDetails();
-  const firstItem = currentCartItems[0];
-  const roomId = firstItem.roomId;
-  const checkIn = toDateOnlyText(firstItem.checkIn);
-  const checkOut = toDateOnlyText(firstItem.checkOut);
-  selectedRoomId = roomId;
-  if (!cartSelectedPrepaidId) {
-    await refreshCartPaymentOptions();
+  if (cartSelectedPrepaidId && cartLastPricing?.prepaidOptions?.length) {
+    const option =
+      cartLastPricing.prepaidOptions.find(
+        (row) => row.id === cartSelectedPrepaidId,
+      ) || cartLastPricing.prepaidOptions[0];
+    if (option) savePreferredPrepaid(option);
   }
-  if (!cartSelectedPrepaidId) {
-    throw new Error("Please select a payment option.");
+  await createBookingRequest(details);
+  await loadCart();
+  if (cartCheckoutStatus) {
+    cartCheckoutStatus.textContent =
+      "Request submitted. Waiting for property confirmation.";
   }
-  const order = await createPaymentOrder({
-    selectedPrepaidId: cartSelectedPrepaidId,
-    guestName: details.name,
-    guestEmail: details.email,
-    guestPhone: details.phone,
-  });
+  if (bookingsNotice) {
+    bookingsNotice.textContent =
+      "Request submitted. Waiting for property confirmation.";
+  }
   closeModal(cartDrawer, cartDrawerBackdrop);
-  launchRazorpay(order, details);
+  await loadBookings();
+  openModal(bookingsModal, bookingsModalBackdrop);
 }
 
 function openCartTermsModal() {
@@ -1427,6 +1714,7 @@ function setupEvents() {
   menuMyBookingsBtn?.addEventListener("click", async () => {
     hideError();
     try {
+      if (bookingsNotice) bookingsNotice.textContent = "";
       await loadBookings();
       openModal(bookingsModal, bookingsModalBackdrop);
       accountMenu?.classList.add("hidden");
@@ -1555,7 +1843,7 @@ function setupEvents() {
     } catch (error) {
       if (cartCheckoutStatus) {
         cartCheckoutStatus.textContent =
-          error.message || "Unable to proceed to checkout.";
+          error.message || "Unable to submit booking request.";
       }
     } finally {
       cartTermsProceedBtn.disabled = false;
@@ -1570,6 +1858,15 @@ function setupEvents() {
         ? "Hide Price Breakdown"
         : "View Price Breakdown";
     }
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      refreshBookingsIfOpen();
+    }
+  });
+  window.addEventListener("focus", () => {
+    refreshBookingsIfOpen();
   });
 }
 
@@ -1620,6 +1917,22 @@ async function initApp() {
   } catch (error) {
     showError(error.message || "Failed to initialize booking app.");
   }
+
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("payment") === "success" && getGuestToken()) {
+    if (bookingsNotice) {
+      bookingsNotice.textContent =
+        "Payment successful. Your booking is confirmed.";
+    }
+    try {
+      await loadBookings();
+      openModal(bookingsModal, bookingsModalBackdrop);
+    } catch {
+      /* ignore */
+    }
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+
   const script = document.createElement("script");
   script.src = "https://checkout.razorpay.com/v1/checkout.js";
   script.async = true;

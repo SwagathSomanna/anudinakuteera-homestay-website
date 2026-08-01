@@ -358,6 +358,10 @@
           <h2>Payments</h2>
           <ul>
             <li>
+              Room stays are requested first. Payment opens only after the
+              property approves your request.
+            </li>
+            <li>
               <strong>50% Advance (Refundable):</strong> Eligible for a refund
               if the booking is cancelled at least 15 days prior to the
               check-in date.
@@ -475,16 +479,16 @@
     >
       <div class="modal-card">
         <button class="modal-close" data-close-modal>&times;</button>
-        <h3 id="termsHeading">Before we confirm</h3>
+        <h3 id="termsHeading">Before you request</h3>
         <p
           class="modal-price-summary"
           id="termsPriceSummary"
           aria-live="polite"
         >
-          Total stay: <strong id="termsTotalPrice">₹0</strong> · Pay now:
+          Total stay: <strong id="termsTotalPrice">₹0</strong> · Preferred advance:
           <strong id="termsDepositPrice">₹0</strong>
         </p>
-        <h4 class="payment-options-heading">Choose Payment Option</h4>
+        <h4 class="payment-options-heading">Preferred Advance (used after approval)</h4>
         <div id="paymentOptions" class="payment-options-list"></div>
         <p class="modal-price-rules hidden" id="termsAppliedRules"></p>
         <p>Please review and accept the villa terms:</p>
@@ -492,8 +496,12 @@
           <li>Check-in 2:00 pm · Check-out 11:00 am.</li>
           <li>Bookings accepted up to 3 months in advance.</li>
           <li>
+            Your request is reviewed by the property. Payment is only taken after
+            approval.
+          </li>
+          <li>
             Cancellation and refund eligibility depends on the selected payment
-            plan at the time of booking.
+            plan at the time of payment.
           </li>
           <li>
             ₹2,000 will be charged per guest exceeding the confirmed booking
@@ -515,7 +523,7 @@
           </li>
         </ul>
         <button class="btn primary block" id="termsAgreeBtn">
-          I Agree &amp; Continue
+          I Agree &amp; Submit Request
         </button>
       </div>
     </div>
@@ -630,11 +638,11 @@
           >Phone Number
           <input type="tel" id="cartCheckoutPhone" placeholder="+91 98714 25151" />
         </label>
-        <h4 class="payment-options-heading">Choose Payment Option</h4>
+        <h4 class="payment-options-heading">Preferred Advance (used after approval)</h4>
         <div id="cartPaymentOptions" class="payment-options-list"></div>
         <p class="notice" id="cartCheckoutStatus"></p>
         <button type="button" class="btn primary block" id="cartCheckoutBtn">
-          Proceed To Checkout
+          Request Booking
         </button>
       </div>
     </div>
@@ -643,14 +651,18 @@
     <div class="modal hidden" id="cartTermsModal" role="dialog" aria-modal="true" aria-labelledby="cartTermsHeading">
       <div class="modal-card">
         <button class="modal-close" id="cartTermsModalCloseBtn">&times;</button>
-        <h3 id="cartTermsHeading">Before checkout</h3>
-        <p>Please review and accept the terms before proceeding:</p>
+        <h3 id="cartTermsHeading">Before you request</h3>
+        <p>Please review and accept the terms before submitting your booking request:</p>
         <ul class="modal-list">
           <li>Check-in 2:00 pm · Check-out 11:00 am.</li>
           <li>Bookings accepted up to 3 months in advance.</li>
           <li>
+            Your request is reviewed by the property. Payment is only taken after
+            approval, within the payment window shown on your booking.
+          </li>
+          <li>
             Cancellation and refund eligibility depends on the selected payment
-            plan at the time of booking.
+            plan at the time of payment.
           </li>
           <li>
             ₹2,000 will be charged per guest exceeding the confirmed booking
@@ -673,7 +685,7 @@
         </label>
         <p class="notice" id="cartTermsNotice"></p>
         <button type="button" class="btn primary block" id="cartTermsProceedBtn">
-          Accept &amp; Continue To Checkout
+          Accept &amp; Submit Request
         </button>
       </div>
     </div>
@@ -683,6 +695,7 @@
       <div class="modal-card">
         <button class="modal-close" id="bookingsModalCloseBtn">&times;</button>
         <h3>My Bookings</h3>
+        <p class="notice" id="bookingsNotice"></p>
         <ul class="summary-list" id="bookingsList">
           <li>Sign in to view bookings.</li>
         </ul>
