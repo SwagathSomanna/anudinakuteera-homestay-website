@@ -3,7 +3,7 @@
 //   window.location.hostname === "127.0.0.1"
 //     ? "http://localhost:3000"
 //     : "https://api.varalabs.in";
-const API_BASE_URL = "https://api.varalabs.in;
+const API_BASE_URL = "https://api.varalabs.in";
 const PROPERTY_SLUG = "anudina-kuteera";
 const GUEST_JWT_KEY = "anudina_guest_jwt";
 const GUEST_USER_KEY = "anudina_guest_user";
