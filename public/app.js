@@ -1,10 +1,17 @@
-const API_BASE_URL = "http://localhost:3000";
+const API_BASE_URL =
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1"
+    ? "http://localhost:3000"
+    : "https://api.varalabs.in";
 const PROPERTY_SLUG = "anudina-kuteera";
 const GUEST_JWT_KEY = "anudina_guest_jwt";
 const GUEST_USER_KEY = "anudina_guest_user";
-/** Public GIS client id — must match backend GUEST_GOOGLE_CLIENT_ID (or GOOGLE_CLIENT_ID) */
+/**
+ * Public GIS client id — must match Vara GOOGLE_CLIENT_ID / GUEST_GOOGLE_CLIENT_ID.
+ * Use the shared villa Web client that already lists anudinakuteera.com origins.
+ */
 const GOOGLE_CLIENT_ID =
-  "983504245398-m192udu921q7387vlgooit213gs3tvct.apps.googleusercontent.com";
+  "237703802735-daoeopf7qskj1g7ei2jc5eqdm4e0mu5u.apps.googleusercontent.com";
 
 const bookingForm = document.getElementById("bookingForm");
 const guestNameInput = document.getElementById("guestName");
