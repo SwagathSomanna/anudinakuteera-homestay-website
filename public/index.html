@@ -149,7 +149,7 @@
           </li>
           <li id="authEntryItem">
             <button type="button" class="nav-action-btn" id="openAuthModalBtn">
-              Sign In
+              Sign in with Google
             </button>
           </li>
           <li class="account-menu-wrap hidden" id="accountMenuWrap">
@@ -158,15 +158,29 @@
               class="account-avatar-btn"
               id="accountMenuBtn"
               aria-label="Account options"
-            >
-              👤
-            </button>
-            <div class="account-menu hidden" id="accountMenu">
-              <button type="button" class="account-menu-item" id="menuMyBookingsBtn">
+              aria-haspopup="true"
+              aria-expanded="false"
+            ></button>
+            <div class="account-menu hidden" id="accountMenu" role="menu">
+              <div class="account-menu-header">
+                <p class="account-menu-name" id="accountMenuName"></p>
+                <p class="account-menu-email" id="accountMenuEmail"></p>
+              </div>
+              <button
+                type="button"
+                class="account-menu-item"
+                id="menuMyBookingsBtn"
+                role="menuitem"
+              >
                 My Bookings
               </button>
-              <button type="button" class="account-menu-item" id="menuLogoutBtn">
-                Logout
+              <button
+                type="button"
+                class="account-menu-item account-menu-item-logout"
+                id="menuLogoutBtn"
+                role="menuitem"
+              >
+                Log out
               </button>
             </div>
           </li>
@@ -568,29 +582,14 @@
 
     <div id="authModalBackdrop" class="modal-backdrop hidden"></div>
     <div class="modal hidden" id="authModal" role="dialog" aria-modal="true">
-      <div class="modal-card">
+      <div class="modal-card auth-modal-card">
         <button class="modal-close" id="authModalCloseBtn">&times;</button>
         <h3>Guest Sign In</h3>
-        <div class="grid">
-          <label
-            >Email
-            <input type="email" id="authEmail" placeholder="guest@example.com" />
-          </label>
-          <label
-            >Name
-            <input type="text" id="authName" placeholder="Guest Name" />
-          </label>
-          <button type="button" class="btn outline" id="requestPinBtn">
-            Request PIN
-          </button>
-          <label
-            >PIN
-            <input type="text" id="authPin" placeholder="123456" />
-          </label>
-          <button type="button" class="btn primary" id="verifyPinBtn">
-            Verify PIN
-          </button>
-        </div>
+        <p class="auth-modal-copy">
+          Sign in with Google to add rooms to your cart and request bookings.
+        </p>
+        <div id="googleSignInBtn" class="google-signin-btn"></div>
+        <p class="notice" id="authStatus"></p>
       </div>
     </div>
 

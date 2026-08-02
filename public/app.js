@@ -1,7 +1,10 @@
-const API_BASE_URL = "https://api.varalabs.in";
+const API_BASE_URL = "http://localhost:3000";
 const PROPERTY_SLUG = "anudina-kuteera";
 const GUEST_JWT_KEY = "anudina_guest_jwt";
 const GUEST_USER_KEY = "anudina_guest_user";
+/** Public GIS client id — must match backend GUEST_GOOGLE_CLIENT_ID (or GOOGLE_CLIENT_ID) */
+const GOOGLE_CLIENT_ID =
+  "983504245398-m192udu921q7387vlgooit213gs3tvct.apps.googleusercontent.com";
 
 const bookingForm = document.getElementById("bookingForm");
 const guestNameInput = document.getElementById("guestName");
@@ -20,11 +23,8 @@ const nightCountDisplay = document.getElementById("nightCount");
 const availabilityIndicator = document.getElementById("availabilityIndicator");
 const roomGrid = document.getElementById("roomGrid");
 
-const authEmailInput = document.getElementById("authEmail");
-const authNameInput = document.getElementById("authName");
-const authPinInput = document.getElementById("authPin");
-const requestPinBtn = document.getElementById("requestPinBtn");
-const verifyPinBtn = document.getElementById("verifyPinBtn");
+const authStatus = document.getElementById("authStatus");
+const googleSignInBtn = document.getElementById("googleSignInBtn");
 const headerCartBtn = document.getElementById("headerCartBtn");
 const headerCartCount = document.getElementById("headerCartCount");
 const openAuthModalBtn = document.getElementById("openAuthModalBtn");
@@ -32,11 +32,14 @@ const authEntryItem = document.getElementById("authEntryItem");
 const accountMenuWrap = document.getElementById("accountMenuWrap");
 const accountMenuBtn = document.getElementById("accountMenuBtn");
 const accountMenu = document.getElementById("accountMenu");
+const accountMenuName = document.getElementById("accountMenuName");
+const accountMenuEmail = document.getElementById("accountMenuEmail");
 const menuMyBookingsBtn = document.getElementById("menuMyBookingsBtn");
 const menuLogoutBtn = document.getElementById("menuLogoutBtn");
 const addToCartBtn = document.getElementById("addToCartBtn");
 const cartItemsList = document.getElementById("cartItemsList");
 const bookingsList = document.getElementById("bookingsList");
+let googleSignInReady = false;
 
 const authModal = document.getElementById("authModal");
 const authModalBackdrop = document.getElementById("authModalBackdrop");
@@ -693,17 +696,78 @@ async function quoteRoomById(roomId, checkIn, checkOut) {
   return payload;
 }
 
+function setAccountMenuOpen(isOpen) {
+  if (!accountMenu || !accountMenuBtn) return;
+  accountMenu.classList.toggle("hidden", !isOpen);
+  accountMenuBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+}
+
 function updateAuthStateUI() {
   const guest = getGuestUser();
   if (guest) {
     authEntryItem?.classList.add("hidden");
     accountMenuWrap?.classList.remove("hidden");
-    if (accountMenuBtn) accountMenuBtn.textContent = (guest.name || "G").charAt(0);
+    if (accountMenuName) {
+      accountMenuName.textContent = guest.name || "Guest";
+    }
+    if (accountMenuEmail) {
+      accountMenuEmail.textContent = guest.email || "";
+    }
+    if (accountMenuBtn) {
+      accountMenuBtn.replaceChildren();
+      const avatarUrl = String(guest.avatar || "").trim();
+      if (avatarUrl) {
+        const img = document.createElement("img");
+        img.src = avatarUrl;
+        img.alt = guest.name || guest.email || "Account";
+        img.className = "account-avatar-img";
+        img.referrerPolicy = "no-referrer";
+        img.onerror = () => {
+          accountMenuBtn.replaceChildren();
+          accountMenuBtn.textContent = (
+            guest.name ||
+            guest.email ||
+            "G"
+          )
+            .charAt(0)
+            .toUpperCase();
+        };
+        accountMenuBtn.appendChild(img);
+      } else {
+        accountMenuBtn.textContent = (
+          guest.name ||
+          guest.email ||
+          "G"
+        )
+          .charAt(0)
+          .toUpperCase();
+      }
+    }
   } else {
     authEntryItem?.classList.remove("hidden");
     accountMenuWrap?.classList.add("hidden");
-    accountMenu?.classList.add("hidden");
+    setAccountMenuOpen(false);
+    if (accountMenuBtn) accountMenuBtn.replaceChildren();
+    if (accountMenuName) accountMenuName.textContent = "";
+    if (accountMenuEmail) accountMenuEmail.textContent = "";
   }
+}
+
+function logoutGuest() {
+  clearGuestAuth();
+  currentCartItems = [];
+  currentCartPayload = null;
+  if (headerCartCount) headerCartCount.textContent = "0";
+  renderCartItems([]);
+  if (bookingsList) bookingsList.innerHTML = "<li>Signed out.</li>";
+  if (bookingsNotice) bookingsNotice.textContent = "";
+  if (cartCheckoutNameInput) cartCheckoutNameInput.value = "";
+  if (cartCheckoutEmailInput) cartCheckoutEmailInput.value = "";
+  if (cartCheckoutPhoneInput) cartCheckoutPhoneInput.value = "";
+  if (cartCheckoutStatus) cartCheckoutStatus.textContent = "";
+  setAccountMenuOpen(false);
+  updateAuthStateUI();
+  hideError();
 }
 
 function renderCartItems(items) {
@@ -810,7 +874,7 @@ async function loadCart() {
 
 async function addCurrentSelectionToCart() {
   if (!getGuestToken()) {
-    throw new Error("Sign in first to add items to cart.");
+    requireGuestSignIn("Sign in with Google first to add items to cart.");
   }
   if (!checkInInput.value || !checkOutInput.value) {
     throw new Error("Select check-in and check-out dates first.");
@@ -1226,7 +1290,7 @@ function scheduleRoomCartQuoteCheck() {
 
 async function confirmRoomCartAdd() {
   if (!getGuestToken()) {
-    throw new Error("Sign in first to add room to cart.");
+    requireGuestSignIn("Sign in with Google first to add room to cart.");
   }
   const checkIn = roomCartCheckInInput?.value;
   const checkOut = roomCartCheckOutInput?.value;
@@ -1347,32 +1411,162 @@ function closeModal(modal, backdrop) {
   updateBodyScrollLock();
 }
 
-async function requestPin() {
-  const email = authEmailInput.value.trim();
-  const name = authNameInput.value.trim() || "Guest";
-  if (!email) throw new Error("Enter email to request PIN.");
-  await apiRequest("/api/guest-auth/request-pin", {
-    method: "POST",
-    body: { propertySlug: PROPERTY_SLUG, email, name },
+function setAuthStatus(message) {
+  if (authStatus) authStatus.textContent = message || "";
+}
+
+function loadGoogleIdentityScript() {
+  return new Promise((resolve, reject) => {
+    if (window.google?.accounts?.id) {
+      resolve();
+      return;
+    }
+    const existing = document.querySelector('script[data-google-gsi="1"]');
+    if (existing) {
+      existing.addEventListener("load", () => resolve());
+      existing.addEventListener("error", () =>
+        reject(new Error("Failed to load Google Sign-In.")),
+      );
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.dataset.googleGsi = "1";
+    script.onload = () => resolve();
+    script.onerror = () =>
+      reject(new Error("Failed to load Google Sign-In."));
+    document.head.appendChild(script);
   });
 }
 
-async function verifyPin() {
-  const email = authEmailInput.value.trim();
-  const pin = authPinInput.value.trim();
-  const name = authNameInput.value.trim() || "Guest";
-  if (!email || !pin) throw new Error("Enter email and PIN.");
-  const { payload } = await apiRequest("/api/guest-auth/verify-pin", {
-    method: "POST",
-    body: { propertySlug: PROPERTY_SLUG, email, pin, name },
-  });
-  if (!payload.success || !payload.token || !payload.guest) {
-    throw new Error("Invalid verify PIN response.");
+function decodeJwtPayload(token) {
+  try {
+    const part = String(token || "").split(".")[1];
+    if (!part) return null;
+    const normalized = part.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(
+      normalized.length + ((4 - (normalized.length % 4)) % 4),
+      "=",
+    );
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
   }
+}
+
+async function completeGuestSignIn(payload, googleCredential = "") {
+  if (!payload?.success || !payload?.token || !payload?.guest) {
+    throw new Error("Invalid Google sign-in response.");
+  }
+
+  const guest = { ...payload.guest };
+  if (!guest.avatar && googleCredential) {
+    const googlePayload = decodeJwtPayload(googleCredential);
+    if (googlePayload?.picture) guest.avatar = String(googlePayload.picture);
+  }
+
   localStorage.setItem(GUEST_JWT_KEY, payload.token);
-  localStorage.setItem(GUEST_USER_KEY, JSON.stringify(payload.guest));
+  localStorage.setItem(GUEST_USER_KEY, JSON.stringify(guest));
   updateAuthStateUI();
-  await loadCart();
+  setAuthStatus("");
+  closeModal(authModal, authModalBackdrop);
+
+  if (cartCheckoutNameInput && !cartCheckoutNameInput.value) {
+    cartCheckoutNameInput.value = guest.name || "";
+  }
+  if (cartCheckoutEmailInput && !cartCheckoutEmailInput.value) {
+    cartCheckoutEmailInput.value = guest.email || "";
+  }
+
+  try {
+    await loadCart();
+    await loadBookings();
+  } catch (error) {
+    showError(
+      error.message ||
+        "Signed in, but bookings are temporarily unavailable.",
+    );
+  }
+}
+
+async function handleGoogleCredentialResponse(response) {
+  try {
+    setAuthStatus("Signing you in...");
+    const credential = response?.credential;
+    if (!credential) {
+      throw new Error("Google did not return a credential.");
+    }
+    const { payload } = await apiRequest("/api/guest-auth/google", {
+      method: "POST",
+      body: {
+        propertySlug: PROPERTY_SLUG,
+        credential,
+      },
+    });
+    await completeGuestSignIn(payload, credential);
+  } catch (error) {
+    setAuthStatus(error.message || "Google sign-in failed.");
+  }
+}
+
+async function initGoogleSignIn() {
+  if (!googleSignInBtn) return;
+  if (!GOOGLE_CLIENT_ID) {
+    setAuthStatus("Google sign-in is not configured.");
+    return;
+  }
+  await loadGoogleIdentityScript();
+  if (!window.google?.accounts?.id) {
+    throw new Error("Google Sign-In failed to initialize.");
+  }
+  window.google.accounts.id.initialize({
+    client_id: GOOGLE_CLIENT_ID,
+    callback: handleGoogleCredentialResponse,
+    auto_select: false,
+    ux_mode: "popup",
+    context: "signin",
+  });
+  googleSignInBtn.innerHTML = "";
+  window.google.accounts.id.renderButton(googleSignInBtn, {
+    theme: "outline",
+    size: "large",
+    text: "signin_with",
+    shape: "rectangular",
+    width: 320,
+    logo_alignment: "left",
+  });
+  googleSignInReady = true;
+}
+
+async function openGuestAuthModal() {
+  setAuthStatus("");
+  openModal(authModal, authModalBackdrop);
+  try {
+    if (!googleSignInReady) {
+      setAuthStatus("Loading Google Sign-In...");
+      await initGoogleSignIn();
+      setAuthStatus("");
+    } else if (window.google?.accounts?.id && googleSignInBtn) {
+      googleSignInBtn.innerHTML = "";
+      window.google.accounts.id.renderButton(googleSignInBtn, {
+        theme: "outline",
+        size: "large",
+        text: "signin_with",
+        shape: "rectangular",
+        width: 320,
+        logo_alignment: "left",
+      });
+    }
+  } catch (error) {
+    setAuthStatus(error.message || "Unable to load Google Sign-In.");
+  }
+}
+
+function requireGuestSignIn(message) {
+  openGuestAuthModal();
+  throw new Error(message || "Sign in with Google to continue.");
 }
 
 function setMinDates() {
@@ -1567,7 +1761,7 @@ async function proceedWithBooking() {
   hideTermsModal();
   try {
     if (!getGuestToken()) {
-      throw new Error("Sign in first to submit a booking request.");
+      requireGuestSignIn("Sign in with Google first to submit a booking request.");
     }
     if (selectedPrepaidId && lastPricing?.prepaidOptions?.length) {
       const option =
@@ -1612,7 +1806,7 @@ function validateCartCheckoutDetails() {
 
 async function proceedCartCheckout() {
   if (!getGuestToken()) {
-    throw new Error("Please sign in to proceed.");
+    requireGuestSignIn("Sign in with Google to proceed.");
   }
   if (!currentCartItems.length) {
     throw new Error("Your cart is empty.");
@@ -1667,40 +1861,10 @@ function setupEvents() {
   checkOutInput?.addEventListener("change", updateBookingSummary);
   adultCountInput?.addEventListener("change", updateBookingSummary);
   childCountInput?.addEventListener("change", updateBookingSummary);
-  requestPinBtn.addEventListener("click", async () => {
-    hideError();
-    try {
-      await requestPin();
-      showError("PIN sent. Check your email.");
-    } catch (error) {
-      showError(error.message);
-    }
-  });
-  verifyPinBtn.addEventListener("click", async () => {
-    hideError();
-    try {
-      await verifyPin();
-      await updateBookingSummary();
-      await loadBookings();
-      const guest = getGuestUser() || {};
-      if (cartCheckoutNameInput && !cartCheckoutNameInput.value) {
-        cartCheckoutNameInput.value = guest.name || "";
-      }
-      if (cartCheckoutEmailInput && !cartCheckoutEmailInput.value) {
-        cartCheckoutEmailInput.value = guest.email || "";
-      }
-      closeModal(authModal, authModalBackdrop);
-    } catch (error) {
-      showError(error.message);
-    }
-  });
-  menuLogoutBtn?.addEventListener("click", () => {
-    clearGuestAuth();
-    updateAuthStateUI();
-    if (headerCartCount) headerCartCount.textContent = "0";
-    renderCartItems([]);
-    bookingsList.innerHTML = "<li>Signed out.</li>";
-    accountMenu?.classList.add("hidden");
+  menuLogoutBtn?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    logoutGuest();
   });
   addToCartBtn?.addEventListener("click", async () => {
     hideError();
@@ -1711,13 +1875,15 @@ function setupEvents() {
       showError(error.message);
     }
   });
-  menuMyBookingsBtn?.addEventListener("click", async () => {
+  menuMyBookingsBtn?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     hideError();
+    setAccountMenuOpen(false);
     try {
       if (bookingsNotice) bookingsNotice.textContent = "";
       await loadBookings();
       openModal(bookingsModal, bookingsModalBackdrop);
-      accountMenu?.classList.add("hidden");
     } catch (error) {
       showError(error.message);
     }
@@ -1740,19 +1906,22 @@ function setupEvents() {
     }
   });
   openAuthModalBtn?.addEventListener("click", () => {
-    openModal(authModal, authModalBackdrop);
+    openGuestAuthModal();
   });
-  accountMenuBtn?.addEventListener("click", () => {
-    accountMenu?.classList.toggle("hidden");
+  accountMenuBtn?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const willOpen = accountMenu?.classList.contains("hidden");
+    setAccountMenuOpen(Boolean(willOpen));
   });
   document.addEventListener("click", (event) => {
-    if (
-      accountMenuWrap &&
-      !accountMenuWrap.contains(event.target) &&
-      !accountMenu?.classList.contains("hidden")
-    ) {
-      accountMenu.classList.add("hidden");
+    if (!accountMenuWrap || accountMenu?.classList.contains("hidden")) return;
+    if (!accountMenuWrap.contains(event.target)) {
+      setAccountMenuOpen(false);
     }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setAccountMenuOpen(false);
   });
   authModalCloseBtn?.addEventListener("click", () => closeModal(authModal, authModalBackdrop));
   authModalBackdrop?.addEventListener("click", () => closeModal(authModal, authModalBackdrop));
@@ -1909,6 +2078,9 @@ async function initApp() {
   if (yearSpan) yearSpan.textContent = String(new Date().getFullYear());
   setupEvents();
   updateAuthStateUI();
+  loadGoogleIdentityScript().catch(() => {
+    /* button init will surface errors when modal opens */
+  });
   try {
     await loadRooms();
     await loadCart();
